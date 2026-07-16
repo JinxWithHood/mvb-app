@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MVB Sanduhr - Google Transit Desktop Portal</title>
+    <!-- Google Fonts: Space Grotesk (headings), Outfit (body), Fira Code (monospaced times/badges) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Background visual wrapper for desktop -->
+    <div class="desktop-bg-blur"></div>
+
+    <!-- Main Responsive Shell -->
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo-area">
+                    <span class="brand-title">MVB</span>
+                </div>
+                
+                <!-- Desktop Navbar -->
+                <nav class="desktop-nav">
+                    <button class="nav-item-desktop active" data-target="abfahrten">
+                        <span class="material-icons-round">directions_transit</span>
+                        Auskunft & Suche
+                    </button>
+                    <button class="nav-item-desktop" data-target="stoerungen">
+                        <span class="material-icons-round">warning_amber</span>
+                        Störungen
+                    </button>
+                    <button class="nav-item-desktop" data-target="tarife">
+                        <span class="material-icons-round">confirmation_number</span>
+                        Tarife
+                    </button>
+                </nav>
+
+                <div class="header-actions">
+                    <button class="icon-button" aria-label="Störungen" id="quick-alert-btn">
+                        <span class="material-icons-round">warning_amber</span>
+                        <span class="alert-dot" id="disruption-badge" style="display: none;"></span>
+                    </button>
+                    <button class="icon-button" aria-label="Neu laden" id="refresh-btn">
+                        <span class="material-icons-round">sync</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            
+            <!-- Departures & Connections Unified Section -->
+            <section id="abfahrten" class="content-section active">
+                <div class="split-layout-desktop">
+                    
+                    <!-- Left Column: Unified Search Forms & Lists -->
+                    <div class="split-left-panel">
+                        <!-- Mode Selector at top of search panel -->
+                        <div class="search-mode-selector">
+                            <button class="mode-tab active" id="mode-departures-btn">
+                                <span class="material-icons-round">schedule</span>
+                                Abfahrten
+                            </button>
+                            <button class="mode-tab" id="mode-connections-btn">
+                                <span class="material-icons-round">route</span>
+                                Verbindungssuche
+                            </button>
+                        </div>
+
+                        <!-- Departures widget -->
+                        <div id="departures-search-widget">
+                            <div class="search-box" style="margin-top: 15px;">
+                                <span class="material-icons-round search-icon">search</span>
+                                <input type="text" id="station-search" placeholder="Haltestelle suchen (z.B. Alter Markt)..." autocomplete="off">
+                                <button class="clear-search-btn" id="clear-search" style="display: none;">
+                                    <span class="material-icons-round">close</span>
+                                </button>
+                                <div id="search-results" class="search-results"></div>
+                            </div>
+
+                            <div class="connection-datetime-row" style="margin-top: 10px;">
+                                <div class="input-group-connection datetime-col">
+                                    <label for="departures-date">Datum</label>
+                                    <div class="search-box-inline">
+                                        <span class="material-icons-round search-icon" style="font-size: 16px;">calendar_today</span>
+                                        <input type="date" id="departures-date">
+                                    </div>
+                                </div>
+                                <div class="input-group-connection datetime-col">
+                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; width: 100%;">
+                                         <label for="departures-time" style="margin-bottom: 0;">Uhrzeit</label>
+                                         <button type="button" class="now-pill-btn" id="set-now-btn">
+                                             <span class="material-icons-round" style="font-size: 13px; vertical-align: middle;">schedule</span>
+                                             <span>JETZT</span>
+                                         </button>
+                                     </div>
+                                    <div class="search-box-inline">
+                                        <span class="material-icons-round search-icon" style="font-size: 16px;">access_time</span>
+                                        <input type="time" id="departures-time">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="input-group-connection" style="margin-top: 10px;">
+                                <label for="departures-duration">Zeitraum</label>
+                                <div class="search-box-inline">
+                                    <span class="material-icons-round search-icon" style="font-size: 16px;">timelapse</span>
+                                    <select id="departures-duration" style="width: 100%; height: 40px; background: transparent; border: none; color: var(--text-white); font-size: 13px; outline: none; cursor: pointer; padding-left: 4px;">
+                                        <option value="60">Nächste 60 Min</option>
+                                        <option value="120">Nächste 120 Min</option>
+                                        <option value="180">Nächste 180 Min</option>
+                                        <option value="240">Nächste 240 Min</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="vehicle-filter-container">
+                                <span class="filter-label">Verkehrsmittel filtern:</span>
+                                <div class="vehicle-filters">
+                                    <button class="filter-pill active" data-vehicle="tram">
+                                        <span class="material-icons-round">tram</span>
+                                        <span>Tram</span>
+                                    </button>
+                                    <button class="filter-pill active" data-vehicle="bus">
+                                        <span class="material-icons-round">directions_bus</span>
+                                        <span>Bus</span>
+                                    </button>
+                                    <button class="filter-pill active" data-vehicle="regional">
+                                        <span class="material-icons-round">train</span>
+                                        <span>Regional</span>
+                                    </button>
+                                    <button class="filter-pill active" data-vehicle="express">
+                                        <span class="material-icons-round">train</span>
+                                        <span>ICE/IC</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="station-hero">
+                                <div class="hero-left">
+                                    <span class="material-icons-round station-icon">directions_transit</span>
+                                    <div>
+                                        <h2 id="current-station-name">Magdeburg, Hauptbahnhof/Willy-Brandt-Platz</h2>
+
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="section-title">
+                                <span>LIVE-ABFAHRTEN</span>
+                                <hr class="title-line">
+                            </div>
+
+                            <div class="departures-list" id="departures-container">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <!-- Connections widget -->
+                        <div id="connections-search-widget" style="display: none;">
+                            <div class="connection-search-card" style="margin-top: 15px;">
+                                <div class="input-group-connection">
+                                    <label for="route-start">Start-Haltestelle</label>
+                                    <div class="search-box-inline">
+                                        <span class="material-icons-round search-icon">trip_origin</span>
+                                        <input type="text" id="route-start" placeholder="Von (z.B. Neustädter Platz)..." autocomplete="off">
+                                        <div id="route-start-results" class="search-results-inline"></div>
+                                    </div>
+                                </div>
+
+                                <div class="input-group-connection">
+                                    <label for="route-dest">Ziel-Haltestelle</label>
+                                    <div class="search-box-inline">
+                                        <span class="material-icons-round search-icon">place</span>
+                                        <input type="text" id="route-dest" placeholder="Nach (z.B. Allee-Center)..." autocomplete="off">
+                                        <div id="route-dest-results" class="search-results-inline"></div>
+                                    </div>
+                                </div>
+
+                                <div class="connection-datetime-row">
+                                    <div class="input-group-connection datetime-col">
+                                        <label for="route-date">Datum</label>
+                                        <div class="search-box-inline">
+                                            <span class="material-icons-round search-icon">calendar_today</span>
+                                            <input type="date" id="route-date">
+                                        </div>
+                                    </div>
+                                    <div class="input-group-connection datetime-col">
+                                         <label for="route-time" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
+                                             <span>Uhrzeit</span>
+                                             <button type="button" class="now-pill-btn" id="route-now-btn">
+                                                 <span class="material-icons-round" style="font-size: 13px; vertical-align: middle;">schedule</span>
+                                                 <span>JETZT</span>
+                                             </button>
+                                         </label>
+                                        <div class="search-box-inline">
+                                            <span class="material-icons-round search-icon">access_time</span>
+                                            <input type="time" id="route-time">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="vehicle-filter-container" style="margin-top: 15px; margin-bottom: 5px;">
+                                    <span class="filter-label">Verkehrsmittel filtern:</span>
+                                    <div class="vehicle-filters">
+                                        <button class="filter-pill active" data-vehicle="tram">
+                                            <span class="material-icons-round">tram</span>
+                                            <span>Tram</span>
+                                        </button>
+                                        <button class="filter-pill active" data-vehicle="bus">
+                                            <span class="material-icons-round">directions_bus</span>
+                                            <span>Bus</span>
+                                        </button>
+                                        <button class="filter-pill active" data-vehicle="regional">
+                                            <span class="material-icons-round">train</span>
+                                            <span>Regional</span>
+                                        </button>
+                                        <button class="filter-pill active" data-vehicle="express">
+                                            <span class="material-icons-round">train</span>
+                                            <span>ICE/IC</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <button id="search-connections-btn" class="google-search-btn">
+                                    <span class="material-icons-round">route</span>
+                                    Verbindungen suchen
+                                </button>
+                            </div>
+
+                            <div class="section-title">
+                                <span>SUCHERGEBNISSE</span>
+                                <hr class="title-line">
+                            </div>
+
+                            <div id="connections-container" class="connections-list">
+                                <div class="connection-placeholder-info">
+                                    <span class="material-icons-round">search_insights</span>
+                                    <p>Gib einen Start- und Zielort ein und klicke auf suchen.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Unified detail timeline & legs viewer -->
+                    <div class="split-right-panel-desktop" id="unified-right-panel">
+                        <div class="timeline-placeholder-desktop" id="unified-placeholder">
+                            <span class="material-icons-round placeholder-icon">explore</span>
+                            <h3>Auskunft & Details</h3>
+                            <p>Wähle links eine Abfahrt oder Verbindung aus, um Details anzuzeigen.</p>
+                        </div>
+                        
+                        <!-- Departures detail timeline -->
+                        <div class="timeline-card-desktop" id="desktop-timeline-card" style="display: none;">
+                            <div class="desktop-timeline-header">
+                                <div class="header-details">
+                                    <div class="modal-badge-wrapper">
+                                        <span id="desktop-journey-badge" class="line-badge shape-tram">--</span>
+                                    </div>
+                                    <div>
+                                        <h3 id="desktop-journey-line-title">Linie --</h3>
+                                        <p id="desktop-journey-direction" class="subtitle">Richtung --</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="desktop-timeline-body">
+                                <div class="journey-meta-info">
+                                    <div class="meta-date" id="desktop-journey-date">--.--.----</div>
+                                    <div class="meta-legend">
+                                        <span>Abfahrt</span>
+                                        <span>Steig</span>
+                                    </div>
+                                </div>
+                                <div id="desktop-journey-container" class="timeline-container">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Connections detail legs -->
+                        <div class="timeline-card-desktop" id="connection-detail-card" style="display: none;">
+                            <div class="desktop-timeline-header">
+                                <div class="header-details">
+                                    <div class="route-duration-badge" id="detail-route-duration">-- Min</div>
+                                    <div>
+                                        <h3 id="detail-route-title">Fahrplan Route</h3>
+                                        <p id="detail-route-summary" class="subtitle">Von -- nach --</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="desktop-timeline-body">
+                                <div class="journey-meta-info">
+                                    <div class="meta-date">Heute</div>
+                                    <div class="meta-legend">
+                                        <span>Zeit</span>
+                                        <span>Steig</span>
+                                    </div>
+                                </div>
+                                <div id="connection-legs-container" class="legs-timeline-container">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Disruptions Section -->
+            <section id="stoerungen" class="content-section">
+                <div class="section-hero">
+                    <div class="hero-left">
+                        <span class="material-icons-round station-icon">warning_amber</span>
+                        <div>
+                            <h2>Verkehrsmelder</h2>
+                            <p class="subtitle">Aktuelle Störungen & Baustellen</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">
+                    <span>MELDUNGEN</span>
+                    <hr class="title-line">
+                </div>
+                
+                <div class="disruptions-list grid-layout" id="disruptions-container">
+                    <div class="loading-state">
+                        <div class="custom-spinner"></div>
+                        <p>Rufe Meldungen ab...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tariffs Section -->
+            <section id="tarife" class="content-section">
+                <div class="section-hero">
+                    <div class="hero-left">
+                        <span class="material-icons-round station-icon">confirmation_number</span>
+                        <div>
+                            <h2>Tarifpreise</h2>
+                            <p class="subtitle">Ticketpreise Stadtverkehr Magdeburg</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">
+                    <span>MAREGO TICKET-AUSWAHL</span>
+                    <hr class="title-line">
+                </div>
+
+                <div class="tariffs-grid-columns">
+                    <!-- Column 1: Einzelfahrkarten -->
+                    <div class="tariff-column">
+                        <h3 class="column-title color-green">Einzelfahrkarten:</h3>
+                        <p class="column-subtitle">Preisstufe Magdeburg (010)</p>
+                        
+                        <div class="ticket-stack">
+                            <div class="mvb-ticket-card bg-green expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Kurzstrecke</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">2,00 Euro</div>
+                                <div class="ticket-app-price">App-Preis: 1,80 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für 1 Person ab Einstieg bis zur 3. Haltestelle.</strong></p>
+                                    <p>Der Einstieg wird nicht mitgezählt. Das Umsteigen zwischen Bus und Straßenbahn ist nur in Reiserichtung möglich. Die Kurzstrecke gilt ausschließlich bei der MVB und maximal 30 Minuten.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="mvb-ticket-card bg-green expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Einzelkarte</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">3,30 Euro</div>
+                                <div class="ticket-app-price">App-Preis: 3,00 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für 1 Person ab dem 15. Geburtstag 60 Minuten ab Entwertung.</strong></p>
+                                    <p>Umstieg nur in Reiserichtung möglich. Rück-, Rund- und Ringfahrten sind nicht zulässig.</p>
+                                    <ul>
+                                        <li><strong>Rückfahrten</strong> sind Fahrten in Richtung Ausgangspunkt auf derselben Strecke wie bei der Hinfahrt.</li>
+                                        <li><strong>Rundfahrten</strong> sind Fahrten, die auf einem anderen Weg als bei der Hinfahrt zum Ausgangspunkt führen.</li>
+                                        <li><strong>Ringfahrten</strong> sind Fahrten über andere Strecken bzw. Linien, die den ursprünglichen Fahrtweg schneiden.</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-green expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Einzelfahrkarte Kind</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">2,50 Euro</div>
+                                <div class="ticket-app-price">App-Preis: 2,30 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig 60 Minuten ab Entwertung für: 1 Kind vom 6. bis 15. Geburtstag</strong>, oder 1 Hund (wenn nicht im geeigneten, geschlossenen Behältnis) oder 1 Handwagen, 1 Fahrradanhänger, 1 sperriger Gegenstand (Sperrige Gegenstände sind Gegenstände, die einen Fahrgastplatz beanspruchen.)</p>
+                                    <p>Umstieg nur in Reiserichtung möglich. Rück-, Rund- und Ringfahrten sind nicht zulässig.</p>
+                                    <ul>
+                                        <li><strong>Rückfahrten</strong> sind Fahrten in Richtung Ausgangspunkt auf derselben Strecke wie bei der Hinfahrt.</li>
+                                        <li><strong>Rundfahrten</strong> sind Fahrten, die auf einem anderen Weg als bei der Hinfahrt zum Ausgangspunkt führen.</li>
+                                        <li><strong>Ringfahrten</strong> sind Fahrten über andere Strecken bzw. Linien, die den ursprünglichen Fahrtweg schneiden.</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-green expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Fahrradkarte MVB</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">3,00 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für 1 Fahrrad oder 1 nicht zusammengeklappten E-Tretroller in MVB-Fahrzeugen.</strong></p>
+                                    <ul>
+                                        <li>Die Gültigkeitsdauer entspricht der Gültigkeitsdauer der Hauptfahrkarte.</li>
+                                        <li>In Kombination mit dem Deutschland-Ticket oder City-Ticket gilt die Fahrradkarte 60 Minuten ab Entwertung.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Tagesfahrkarten & Zeitfahrkarten -->
+                    <div class="tariff-column">
+                        <h3 class="column-title color-lightgreen">Tagesfahrkarten:</h3>
+                        <p class="column-subtitle">Preisstufe Magdeburg (010)</p>
+                        
+                        <div class="ticket-stack" style="margin-bottom: 24px;">
+                            <div class="mvb-ticket-card bg-lightgreen expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">24-Stunden-Karte</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">6,50 Euro</div>
+                                <div class="ticket-app-price">App-Preis: 5,90 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für 1 Person ab dem 15. Geburtstag, 24 Stunden ab Entwertung auf allen Linien, in alle Richtungen in der Preisstufe Magdeburg.</strong></p>
+                                    <p>Kostenfreie Mitnahme von bis zu 3 Kindern vom 6. bis 15. Geburtstag.</p>
+                                    <p>Nicht übertragbar. Vor- und Zuname in Druckbuchstaben eintragen (entfällt bei digital erworbenen Fahrkarten).</p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-lightgreen expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">24-Stunden-Karte Kind</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">4,90 Euro</div>
+                                <div class="ticket-app-price">App-Preis: 4,50 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig ab Entwertung 24 Stunden auf allen Linien, in alle Richtungen in der Preisstufe Magdeburg für:</strong></p>
+                                    <ul>
+                                        <li>1 Kind vom 6. bis 15. Geburtstag</li>
+                                        <li>oder 1 Hund (wenn nicht im geeigneten, geschlossenen Behältnis)</li>
+                                        <li>oder 1 Handwagen</li>
+                                        <li>oder 1 Fahrradanhänger</li>
+                                        <li>oder 1 sperriger Gegenstand (Sperrige Gegenstände sind Gegenstände, die einen Fahrgastplatz beanspruchen.)</li>
+                                    </ul>
+                                    <p>Nicht übertragbar. Vor- und Zuname in Druckbuchstaben eintragen (entfällt bei digital erworbenen Fahrkarten).</p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-lightgreen expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">24-Stunden-Karte Gruppe (Preis pro Person)</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">2,60 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig ab Entwertung 24 Stunden auf allen Linien, in alle Richtungen in der Preisstufe Magdeburg für:</strong></p>
+                                    <ul>
+                                        <li>1 Gruppe mit mindestens 16 Personen</li>
+                                        <li>angemeldeten Fahrten</li>
+                                    </ul>
+                                    <p>Nicht übertragbar.</p>
+                                    <p><strong>Anmeldung:</strong></p>
+                                    <ul>
+                                        <li>Anmeldeformular muss bei der Fahrt mitgeführt werden.</li>
+                                        <li>Die Anmeldung der Gruppen-Tageskarte muss spätestens 10 Werktage vor Reisebeginn erfolgen.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h3 class="column-title color-yellow">Zeitfahrkarten:</h3>
+                        <p class="column-subtitle">Preisstufe Magdeburg (010)</p>
+
+                        <div class="ticket-stack">
+                            <div class="mvb-ticket-card bg-yellow expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Monatskarte</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">82,00 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültigkeitsdauer:</strong></p>
+                                    <ul>
+                                        <li>vom ersten Geltungstag um 0 Uhr bis zum gleichen Kalendertag des Folgemonats um 4 Uhr</li>
+                                        <li>fällt das Ende der Gültigkeitsdauer auf einen kalendarisch nicht vorhandenen Tag, endet die Gültigkeit um 4 Uhr am ersten Kalendertag des zweiten Folgemonats</li>
+                                    </ul>
+                                    <p><strong>Gültig für:</strong></p>
+                                    <ul>
+                                        <li>1 Person</li>
+                                        <li>alle Linien innerhalb der Preisstufe Magdeburg</li>
+                                        <li>alle Fahrtrichtungen</li>
+                                        <li>Kostenfreie Mitnahme 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang)</li>
+                                    </ul>
+                                    <p>Nicht übertragbar. Vor- und Zuname in Druckbuchstaben eintragen (entfällt bei digital erworbenen Fahrkarten).</p>
+                                    <p><strong>Hinweis:</strong> Inhaber der Otto-City-Card können für die Preisstufe Magdeburg in allen MVB-Verkaufsstellen Fahrkarten unter Anrechnung von Wertmarken erwerben. Die Otto-City-Card erhalten Anspruchsberechtigte im Sozial- und Wohnungsamt und in jedem Bürgerbüro in Magdeburg.</p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-yellow expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Monatskarte ermäßigt</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">62,00 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültigkeitsdauer:</strong></p>
+                                    <ul>
+                                        <li>vom ersten Geltungstag um 0 Uhr bis zum gleichen Kalendertag des Folgemonats um 4 Uhr</li>
+                                        <li>fällt das Ende der Gültigkeitsdauer auf einen kalendarisch nicht vorhandenen Tag, endet die Gültigkeit um 4 Uhr am ersten Kalendertag des zweiten Folgemonats</li>
+                                    </ul>
+                                    <p><strong>Gültig für:</strong></p>
+                                    <ul>
+                                        <li>1 schulpflichtige Person vom 6. bis 15. Geburtstag,</li>
+                                        <li>1 Schülerin oder einen Schüler ab 15 Jahren,</li>
+                                        <li>1 Studentin oder einen Studenten,</li>
+                                        <li>1 Auszubildende oder einen Auszubildenden.</li>
+                                        <li>alle Linien innerhalb der Preisstufe Magdeburg</li>
+                                        <li>alle Fahrtrichtungen</li>
+                                        <li>Kostenfreie Mitnahme 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang)</li>
+                                    </ul>
+                                    <p>Nicht übertragbar und nur mit Berechtigungsnachweis gültig. Vor- und Zuname in Druckbuchstaben eintragen (entfällt bei digital erworbenen Fahrkarten).</p>
+                                    <p><strong>Hinweise:</strong></p>
+                                    <ul>
+                                        <li>Inhaber der Otto-City-Card können für die Preisstufe Magdeburg in allen MVB-Verkaufsstellen Fahrkarten unter Anrechnung von Wertmarken erwerben. Die Otto-City-Card erhalten Anspruchsberechtigte im Sozial- und Wohnungsamt und in jedem Bürgerbüro in Magdeburg.</li>
+                                        <li>Weitere Informationen zur Schülerbeförderung und zur Erstattung von Fahrtkosten finden Sie auf der Informationsseite „Schülerbeförderung und Schülerfahrkarten“ der Landeshauptstadt Magdeburg.</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-yellow expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Sozialticket</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">19,00 Euro</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültigkeitsdauer:</strong></p>
+                                    <ul>
+                                        <li>vom ersten Geltungstag um 0 Uhr bis zum gleichen Kalendertag des Folgemonats um 4 Uhr</li>
+                                        <li>fällt das Ende der Gültigkeitsdauer auf einen kalendarisch nicht vorhandenen Tag, endet die Gültigkeit um 4 Uhr am ersten Kalendertag des zweiten Folgemonats</li>
+                                    </ul>
+                                    <p><strong>Gültig für:</strong></p>
+                                    <ul>
+                                        <li>Inhaberinnen und Inhaber eines gültigen Stadtpasses bzw. der Otto-City-Card</li>
+                                        <li>alle Linien innerhalb der Preisstufe Magdeburg</li>
+                                        <li>alle Fahrtrichtungen</li>
+                                        <li>Kostenfreie Mitnahme 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang)</li>
+                                    </ul>
+                                    <p><strong>Nicht übertragbar</strong> und nur in Verbindung mit einem gültigen amtlichen Lichtbildausweis sowie einem gültigen Stadtpass oder einer gültigen Otto-City-Card gültig. Vor- und Zuname werden vom Verkaufspersonal in Druckbuchstaben eingetragen.</p>
+                                    <p>Weitere Informationen finden Sie auf der Informationsseite zum Sozialticket.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 3: Abo-Fahrkarten -->
+                    <div class="tariff-column">
+                        <h3 class="column-title color-orange">Abo-Fahrkarten:</h3>
+                        <p class="column-subtitle">Preisstufe Magdeburg (010)</p>
+
+                        <div class="ticket-stack">
+                            <div class="mvb-ticket-card bg-orange expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Deutschland-Ticket</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">63,00 Euro mtl.</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für:</strong></p>
+                                    <ul>
+                                        <li>1 Person</li>
+                                        <li>deutschlandweit im Regional- und Nahverkehr</li>
+                                    </ul>
+                                    <p><strong>Nicht übertragbar.</strong> Nur mit amtlichem Lichtbildausweis gültig.</p>
+                                    <p><strong>Das Abonnement ist monatlich kündbar.</strong></p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-orange expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Persönliche Abo-Monatskarte</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">55,00 Euro mtl.</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig für:</strong></p>
+                                    <ul>
+                                        <li>1 Person</li>
+                                        <li>alle Linien innerhalb der Preisstufe Magdeburg</li>
+                                        <li>kostenfreie Mitnahme von bis zu 3 Kindern vom 6. bis 15. Geburtstag</li>
+                                        <li>kostenfreie Mitnahme von 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang)</li>
+                                    </ul>
+                                    <p><strong>Nicht übertragbar.</strong> Nur mit amtlichem Lichtbildausweis gültig.</p>
+                                    <p><strong>Das Abonnement wird auf unbestimmte Zeit abgeschlossen und ist monatlich kündbar.</strong></p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-orange expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">passend dazu Abo-Erweiterung Abo-Plus</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">+15,00 Euro mtl.</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <ul>
+                                        <li>Mitnahme einer weiteren Person (montags bis freitags ab 17 Uhr sowie an Wochenenden und Feiertagen ganztägig)</li>
+                                        <li>Kostenfreie Mitnahme eines Hundes</li>
+                                        <li>Verbundweite Gültigkeit an Wochenenden und Feiertagen</li>
+                                        <li>Übertragbar auf andere Personen (nur mit Chipkarte)</li>
+                                        <li>Nur in Kombination mit der Persönlichen Abo-Monatskarte erhältlich</li>
+                                        <li>Monatlich kündbar</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-orange expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Ermäßigte Abo-Monatskarte</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">49,40 Euro mtl.</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig</strong> auf allen Linien, in alle Richtungen innerhalb der Preisstufe Magdeburg für:</p>
+                                    <ul>
+                                        <li>1 Person ab 65 Jahren,</li>
+                                        <li>oder 1 schulpflichtige Person vom 6. bis 15. Geburtstag,</li>
+                                        <li>oder 1 Schüler ab 15. Geburtstag,</li>
+                                        <li>oder 1 Student</li>
+                                        <li>oder 1 Auszubildender</li>
+                                    </ul>
+                                    <p><strong>Nicht übertragbar und nur mit Berechtigungsnachweis gültig.</strong></p>
+                                    <p><strong>Das Abonnement ist monatlich kündbar.</strong></p>
+                                    <p>Bei MVB: Kostenfreie Mitnahme von 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang)</p>
+                                </div>
+                            </div>
+
+                            <div class="mvb-ticket-card bg-orange expandable">
+                                <div class="ticket-header-row">
+                                    <span class="ticket-name">Schülerticket Magdeburg</span>
+                                    <span class="material-icons-round ticket-toggle-icon">add</span>
+                                </div>
+                                <div class="ticket-main-price">kostenlos oder 9,00 Euro mtl.</div>
+                                <div class="ticket-details-collapse" style="display: none;">
+                                    <p><strong>Gültig</strong> auf allen Linien, in alle Richtungen innerhalb der Preisstufe Magdeburg:</p>
+                                    <ul>
+                                        <li>ein Kind,</li>
+                                        <li>eine Schülerin oder ein Schüler,</li>
+                                        <li>eine Auszubildende oder ein Auszubildender.</li>
+                                    </ul>
+                                    <p>entsprechend der Anspruchsvoraussetzungen.</p>
+                                    <p><strong>Nicht übertragbar und nur mit Berechtigungsnachweis gültig.</strong></p>
+                                    <p>Kostenfreie Mitnahme von 1 Fahrrad (Fahrradmitnahme begrenzt, Personen haben Vorrang).</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-banner" style="margin-top: 30px;">
+                    <span class="material-icons-round info-icon">info_outline</span>
+                    <div class="info-content">
+                        <strong>* Tarifreform & Digitalrabatt ab 1. August 2026:</strong>
+                        <p>Bei Kauf über offizielle Apps (z.B. FAIRTIQ oder easy.GO) sparst du ca. 10 % Digitalrabatt auf Einzel- und Kurzstreckentickets!</p>
+                    </div>
+                </div>
+            </section>
+
+
+        </main>
+        
+        <!-- Mobile Bottom Navigation Bar -->
+        <nav class="mobile-bottom-nav">
+            <button class="nav-item-mobile active" data-target="abfahrten">
+                <span class="material-icons-round">directions_transit</span>
+                <span>Auskunft</span>
+            </button>
+            <button class="nav-item-mobile" data-target="stoerungen">
+                <span class="material-icons-round">warning_amber</span>
+                <span>Störungen</span>
+            </button>
+            <button class="nav-item-mobile" data-target="tarife">
+                <span class="material-icons-round">confirmation_number</span>
+                <span>Tarife</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-notification-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
