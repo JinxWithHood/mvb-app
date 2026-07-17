@@ -1,0 +1,6 @@
+flask
+flask-cors
+pyhafas
+requests
+beautifulsoup4
+pytz

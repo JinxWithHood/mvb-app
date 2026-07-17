@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Magdeburg Mobil — Fahrplan &amp; Live-Abfahrten</title>
+  <meta name="description" content="Echtzeit-Fahrplan, Abfahrten, Verbindungssuche und Störungsmeldungen für den Nahverkehr in Magdeburg. Responsive Webinterface und Mobile App.">
+  <meta name="theme-color" content="#018e4a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Magdeburg Mobil">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a href="#main-results-area" class="skip-link">Zum Inhalt springen</a>
+  <div class="aria-live-region" id="ariaLive" aria-live="assertive" aria-atomic="true"></div>
+
+  <!-- Main App Wrapper -->
+  <div id="app" class="theme-light">
+    
+    <!-- 1. TOP FIXED HEADER BAR -->
+    <header class="app-header" role="banner">
+      <div class="header-container">
+        <!-- Logo Area -->
+        <div class="header-logo">
+          <span class="logo-emoji" aria-hidden="true">🚃</span>
+          <span class="logo-text">Magdeburg Mobil</span>
+          <span class="live-indicator">
+            <span class="live-dot" aria-hidden="true"></span> Live
+          </span>
+        </div>
+
+        <!-- Desktop Main Menu Links -->
+        <nav class="header-nav" aria-label="Hauptnavigation">
+          <button class="nav-link active" data-target="departures">🚏 Abfahrten</button>
+          <button class="nav-link" data-target="connections">🔄 Verbindungen</button>
+          <button class="nav-link" data-target="alerts">⚠️ Meldungen <span class="badge" id="headerAlertBadge" hidden>0</span></button>
+          <button class="nav-link" data-target="map">🗺️ Netzplan</button>
+        </nav>
+
+        <!-- Header Actions (Theme switcher + Uhrzeit) -->
+        <div class="header-actions">
+          <button id="themeToggleBtn" class="header-theme-btn" aria-label="Farbschema wechseln">🌙</button>
+          <div class="header-time" id="headerTime" aria-label="Aktuelle Uhrzeit">--:--</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 2. SCROLLABLE APP BODY -->
+    <div class="app-body">
+      
+      <!-- HERO SELECTION SECTION -->
+      <section class="hero-section" id="heroSection" aria-label="Suche und Schnellzugriff">
+        <div class="hero-container">
+          
+          <!-- Unified Timetable Search Card -->
+          <div class="search-widget-card glass-card" id="unifiedSearchWidget">
+            
+            <!-- FORM 1: DEPARTURES FORM -->
+            <div class="widget-form-panel" id="form-departures" role="tabpanel" aria-label="Abfahrtszeiten Suche">
+              <div class="search-field">
+                <label for="stationInput" class="field-label">Haltestelle auswählen</label>
+                <div class="input-wrapper">
+                  <span class="input-icon" aria-hidden="true">🔍</span>
+                  <input type="text" id="stationInput" class="widget-input"
+                         placeholder="Haltestelle eingeben..."
+                         autocomplete="off"
+                         aria-label="Haltestelle suchen"
+                         aria-autocomplete="list"
+                         aria-controls="stationSuggestions"
+                         aria-expanded="false"
+                         value="Magdeburg, Hauptbahnhof">
+                  <button class="clear-btn" id="clearStation" aria-label="Eingabe löschen" hidden>&times;</button>
+                </div>
+                <ul id="stationSuggestions" class="suggestions-list" role="listbox" aria-label="Haltestellenvorschläge" hidden></ul>
+              </div>
+
+              <!-- Date/Time Picker row -->
+              <div class="datetime-row">
+                <div class="datetime-field">
+                  <label for="depDate">Datum</label>
+                  <div class="input-wrapper">
+                    <input type="date" id="depDate" aria-label="Abfahrtsdatum">
+                  </div>
+                </div>
+                <div class="datetime-field">
+                  <label for="depTime">Uhrzeit</label>
+                  <div class="input-wrapper">
+                    <input type="time" id="depTime" aria-label="Abfahrtszeit">
+                  </div>
+                </div>
+                <div class="datetime-field">
+                  <label for="depDuration">Zeitraum</label>
+                  <div class="input-wrapper">
+                    <select id="depDuration" aria-label="Zeitraum">
+                      <option value="30">30 min</option>
+                      <option value="60" selected>60 min</option>
+                      <option value="120">2 Std</option>
+                      <option value="240">4 Std</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button class="now-btn active" id="nowBtn" aria-label="Live-Modus umschalten" aria-pressed="true">
+                  <span class="now-dot" aria-hidden="true"></span> JETZT (LIVE)
+                </button>
+                <button class="submit-btn" id="submitDepBtn">Los!</button>
+              </div>
+            </div>
+
+            <!-- FORM 2: CONNECTIONS FORM -->
+            <div class="widget-form-panel" id="form-connections" role="tabpanel" aria-label="Verbindungs-Suche" hidden>
+              <div class="connection-inputs-grid">
+                <div class="search-field">
+                  <label for="originInput" class="field-label">Von</label>
+                  <div class="input-wrapper">
+                    <span class="input-icon" aria-hidden="true">📍</span>
+                    <input type="text" id="originInput" class="widget-input" placeholder="Start-Haltestelle..." autocomplete="off" aria-label="Abfahrtsort" aria-autocomplete="list" aria-controls="originSuggestions" aria-expanded="false">
+                  </div>
+                  <ul id="originSuggestions" class="suggestions-list" role="listbox" aria-label="Start-Vorschläge" hidden></ul>
+                </div>
+
+                <button class="swap-btn" id="swapBtn" aria-label="Start und Ziel tauschen">⇅</button>
+
+                <div class="search-field">
+                  <label for="destInput" class="field-label">Nach</label>
+                  <div class="input-wrapper">
+                    <span class="input-icon" aria-hidden="true">🎯</span>
+                    <input type="text" id="destInput" class="widget-input" placeholder="Ziel-Haltestelle..." autocomplete="off" aria-label="Zielort" aria-autocomplete="list" aria-controls="destSuggestions" aria-expanded="false">
+                  </div>
+                  <ul id="destSuggestions" class="suggestions-list" role="listbox" aria-label="Ziel-Vorschläge" hidden></ul>
+                </div>
+              </div>
+
+              <!-- Date/Time picker row -->
+              <div class="datetime-row">
+                <div class="datetime-field">
+                  <label for="connDate">Datum</label>
+                  <div class="input-wrapper">
+                    <input type="date" id="connDate" aria-label="Verbindungsdatum">
+                  </div>
+                </div>
+                <div class="datetime-field">
+                  <label for="connTime">Uhrzeit</label>
+                  <div class="input-wrapper">
+                    <input type="time" id="connTime" aria-label="Verbindungszeit">
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button class="submit-btn" id="submitConnBtn">Los!</button>
+              </div>
+            </div>
+          </div> <!-- End search-widget-card -->
+
+          <!-- Quick Action Buttons Bar -->
+          <div class="quick-action-bar" id="quickActionBar" role="group" aria-label="Schnellzugriff">
+            <button class="action-btn" data-action="live-departures">
+              <span class="action-icon" aria-hidden="true">🚏</span>
+              <span class="action-label">Live-Abfahrtszeiten</span>
+            </button>
+            <button class="action-btn" data-action="alerts">
+              <span class="action-icon" aria-hidden="true">⚠️</span>
+              <span class="action-label">Verkehrsmelder</span>
+            </button>
+            <button class="action-btn" data-action="connections">
+              <span class="action-icon" aria-hidden="true">🔄</span>
+              <span class="action-label">Verbindungssuche</span>
+            </button>
+            <button class="action-btn" data-action="map">
+              <span class="action-icon" aria-hidden="true">🗺️</span>
+              <span class="action-label">Netz- &amp; Fahrpläne</span>
+            </button>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- MAIN RESULTS GRID DISPLAY AREA -->
+      <section class="main-results-area" id="main-results-area" aria-label="Fahrplanergebnisse">
+        <div class="results-container">
+          <div class="results-layout-grid">
+            
+            <!-- LEFT PANEL: Dynamic Timetable Lists -->
+            <div class="results-list-panel">
+              
+              <!-- === DEPARTURES RESULTS PANEL === -->
+              <div class="result-tab-content fade-in" id="panel-departures">
+                <!-- Vehicle Filter Pills -->
+                <div class="filter-pills" role="group" aria-label="Verkehrsmittel-Filter">
+                  <button class="filter-pill active" data-filter="all" aria-pressed="true">Alle</button>
+                  <button class="filter-pill" data-filter="tram" aria-pressed="false">𚚊 Tram</button>
+                  <button class="filter-pill" data-filter="bus" aria-pressed="false">🚌 Bus</button>
+                  <button class="filter-pill" data-filter="regional" aria-pressed="false">🚆 Bahn</button>
+                </div>
+
+                <!-- Loading Skeleton -->
+                <div id="departuresLoading" class="loading-skeleton" hidden>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text medium"></div><div class="skeleton-text short"></div></div><div class="skeleton-time"></div></div>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text short"></div></div><div class="skeleton-time"></div></div>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text medium"></div><div class="skeleton-text short"></div></div><div class="skeleton-time"></div></div>
+                </div>
+
+                <!-- Departures List -->
+                <div id="departuresList" class="departures-list" role="list" aria-live="polite" aria-label="Abfahrtsliste"></div>
+
+                <!-- Empty State -->
+                <div id="departuresEmpty" class="empty-state" hidden>
+                  <span class="empty-icon" aria-hidden="true">🚏</span>
+                  <p>Keine Abfahrten in diesem Zeitraum gefunden</p>
+                </div>
+              </div>
+
+              <!-- === CONNECTIONS RESULTS PANEL === -->
+              <div class="result-tab-content" id="panel-connections" hidden>
+                <!-- Loading Skeleton -->
+                <div id="connectionsLoading" class="loading-skeleton" hidden>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                </div>
+
+                <!-- Connections List -->
+                <div id="connectionsList" class="connections-list" role="list" aria-label="Verbindungsergebnisse"></div>
+
+                <!-- Empty State -->
+                <div id="connectionsEmpty" class="empty-state">
+                  <span class="empty-icon" aria-hidden="true">🔄</span>
+                  <p>Gib Start &amp; Ziel oben ein und klicke auf „Los!“, um Verbindungen zu suchen.</p>
+                </div>
+              </div>
+
+              <!-- === ALERTS RESULTS PANEL === -->
+              <div class="result-tab-content" id="panel-alerts" hidden>
+                <div class="push-banner glass-card" id="pushBanner" hidden>
+                  <p>🔔 Möchtest du Push-Benachrichtigungen bei neuen Störungsmeldungen erhalten?</p>
+                  <div class="push-actions">
+                    <button class="push-btn-yes" id="enablePush">Aktivieren</button>
+                    <button class="push-btn-no" id="dismissPush">Später</button>
+                  </div>
+                </div>
+
+                <!-- Loading Skeleton -->
+                <div id="alertsLoading" class="loading-skeleton" hidden>
+                  <div class="skeleton-card"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                </div>
+
+                <!-- Alerts List -->
+                <div id="alertsList" class="alerts-list" role="list" aria-label="Meldungen"></div>
+              </div>
+
+              <!-- === MAP RESULTS PANEL === -->
+              <div class="result-tab-content" id="panel-map" hidden>
+                <div class="map-controls glass-card">
+                  <button class="map-btn active" data-map="day" aria-pressed="true">Tagesnetz</button>
+                  <button class="map-btn" data-map="night" aria-pressed="false">Nachtnetz</button>
+                </div>
+                <div class="map-container glass-card">
+                  <iframe id="mapFrame" src="about:blank" title="Liniennetzplan" allowfullscreen loading="lazy"></iframe>
+                </div>
+              </div>
+
+            </div> <!-- End results-list-panel -->
+
+            <!-- RIGHT PANEL: Desktop Detail Tracking (Stops Timeline) -->
+            <aside class="details-panel" id="desktopDetailsPanel" aria-label="Echtzeit-Details">
+              <!-- Clock Placeholder -->
+              <div class="details-placeholder" id="detailsPlaceholder">
+                <div class="clock-widget">
+                  <div class="clock-time" id="widgetClockTime">--:--:--</div>
+                  <div class="clock-date" id="widgetClockDate">Bitte warten...</div>
+                </div>
+                <div class="placeholder-text-box">
+                  <span class="placeholder-icon">🚃</span>
+                  <p class="placeholder-title">Live-Verlauf &amp; Position</p>
+                  <p class="placeholder-desc">Klicke auf eine Abfahrt oder eine Verbindung, um den Linienverlauf und Fahrzeug-Standort live zu verfolgen.</p>
+                </div>
+              </div>
+
+              <!-- Dynamic detail timeline content -->
+              <div class="details-content" id="detailsContent" style="display:none;">
+                <div class="details-header">
+                  <span class="details-line-badge" id="detailsLineBadge"></span>
+                  <div class="details-header-text">
+                    <h3 id="detailsTitle">Linienverlauf</h3>
+                    <p id="detailsSubtitle">Richtung --</p>
+                  </div>
+                </div>
+                <div id="detailsMessages" class="journey-messages"></div>
+                <div id="detailsRoute" class="journey-route" role="list" aria-label="Haltestellenverlauf"></div>
+              </div>
+            </aside>
+
+          </div>
+        </div>
+      </section>
+
+    </div> <!-- End app-body -->
+
+    <!-- 3. MOBILE BOTTOM TAB NAVIGATION -->
+    <nav class="tab-nav-mobile" role="tablist" aria-label="Mobile Hauptnavigation">
+      <button class="tab-btn active" role="tab" aria-selected="true" data-tab="departures" id="tab-departures" aria-controls="panel-departures">
+        <span class="tab-icon" aria-hidden="true">🚏</span>
+        <span class="tab-label">Abfahrten</span>
+      </button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="connections" id="tab-connections" aria-controls="panel-connections" tabindex="-1">
+        <span class="tab-icon" aria-hidden="true">🔄</span>
+        <span class="tab-label">Verbindungen</span>
+      </button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="alerts" id="tab-alerts" aria-controls="panel-alerts" tabindex="-1">
+        <span class="tab-icon" aria-hidden="true">⚠️</span>
+        <span class="tab-label">Meldungen</span>
+        <span class="alert-badge" id="alertBadge" hidden>0</span>
+      </button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="map" id="tab-map" aria-controls="panel-map" tabindex="-1">
+        <span class="tab-icon" aria-hidden="true">🗺️</span>
+        <span class="tab-label">Netzplan</span>
+      </button>
+    </nav>
+
+    <!-- 4. MOBILE JOURNEY DETAIL MODAL -->
+    <div class="modal-overlay" id="journeyModal" role="dialog" aria-modal="true" aria-labelledby="journeyModalTitle" hidden>
+      <div class="modal-container">
+        <div class="modal-header">
+          <div class="modal-header-info">
+            <span class="modal-line-badge" id="modalLineBadge"></span>
+            <div>
+              <h2 id="journeyModalTitle" class="modal-title">Linienverlauf</h2>
+              <p class="modal-subtitle" id="modalDirection"></p>
+            </div>
+          </div>
+          <button class="modal-close" id="closeModal" aria-label="Schließen">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="journeyMessages" class="journey-messages"></div>
+          <div class="journey-route" id="journeyRoute" role="list" aria-label="Haltestellenverlauf"></div>
+          <div id="journeyLoading" class="loading-skeleton" hidden>
+            <div class="skeleton-route">
+              <div class="skeleton-stop"><div class="skeleton-time"></div><div class="skeleton-dot"></div><div class="skeleton-text medium"></div></div>
+              <div class="skeleton-stop"><div class="skeleton-time"></div><div class="skeleton-dot"></div><div class="skeleton-text long"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div> <!-- End Main App Wrapper -->
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer" aria-live="assertive"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
