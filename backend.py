@@ -3009,31 +3009,56 @@ def get_radar():
                     if pt:
                         track.append([int(t_ms), round(pt[0], 6), round(pt[1], 6)])
 
-            # Next stop + current delay from the stop list
+            # Next stop + current delay from the stop list.
+            # HAFAS sometimes reports nonsense for a single stop (e.g. +39 at one stop, -1 at the next),
+            # so a stop only counts if its realtime is not later than the following stop's realtime.
             now_hms = now.strftime('%H%M%S')
             next_stop, delay_min = '', None
-            for st in jny.get('stopL') or []:
-                t_r = st.get('aTimeR') or st.get('dTimeR')
-                t_s = st.get('aTimeS') or st.get('dTimeS')
-                if t_s and (t_r or t_s)[-6:] >= now_hms:
-                    lx = st.get('locX')
+
+            def to_sec(v):
+                v = str(v)[-6:]
+                return int(v[0:2]) * 3600 + int(v[2:4]) * 60 + int(v[4:6] or 0)
+
+            def stop_delay(st):
+                t_r = st.get('dTimeR') or st.get('aTimeR')
+                t_s = st.get('dTimeS') or st.get('aTimeS')
+                if not (t_r and t_s):
+                    return None
+                diff = to_sec(t_r) - to_sec(t_s)
+                if diff > 43200:
+                    diff -= 86400
+                elif diff < -43200:
+                    diff += 86400
+                return diff
+
+            def stop_rt(st):
+                t = st.get('aTimeR') or st.get('dTimeR') or st.get('aTimeS') or st.get('dTimeS')
+                return to_sec(t) if t else None
+
+            try:
+                stops_l = jny.get('stopL') or []
+                upcoming = [st for st in stops_l
+                            if (st.get('aTimeR') or st.get('dTimeR') or st.get('aTimeS') or st.get('dTimeS') or '')[-6:] >= now_hms]
+                chosen = None
+                for k, st in enumerate(upcoming):
+                    nxt = upcoming[k + 1] if k + 1 < len(upcoming) else None
+                    a, b = stop_rt(st), (stop_rt(nxt) if nxt else None)
+                    if a is not None and b is not None and a > b + 60:
+                        continue  # implausible realtime at this stop
+                    chosen = st
+                    break
+                if chosen is None and upcoming:
+                    chosen = upcoming[-1]
+                if chosen is not None:
+                    lx = chosen.get('locX')
                     if lx is not None and lx < len(loc_l):
                         next_stop = loc_l[lx].get('name', '')
-                    if t_r and t_s:
-                        try:
-                            def to_sec(v):
-                                v = v[-6:]
-                                return int(v[0:2]) * 3600 + int(v[2:4]) * 60 + int(v[4:6] or 0)
-                            diff = to_sec(t_r) - to_sec(t_s)
-                            if diff > 43200:
-                                diff -= 86400
-                            elif diff < -43200:
-                                diff += 86400
-                            # round to whole minutes like the departure boards (30 s early is still on time)
-                            delay_min = int(diff / 60.0 + (0.5 if diff >= 0 else -0.5)) if abs(diff) >= 30 else 0
-                        except Exception:
-                            delay_min = None
-                    break
+                    diff = stop_delay(chosen)
+                    if diff is not None:
+                        # round to whole minutes like the departure boards (< 30 s counts as on time)
+                        delay_min = int(diff / 60.0 + (0.5 if diff >= 0 else -0.5)) if abs(diff) >= 30 else 0
+            except Exception:
+                delay_min = None
 
             line_key = normalize_line_name(name)
             color = get_line_color(name) if vtype in ('tram', 'bus', 'sev') else LINE_COLORS.get(line_key, '#64748b')

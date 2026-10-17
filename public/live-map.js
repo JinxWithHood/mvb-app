@@ -1272,7 +1272,7 @@
                 </div>
                 <div class="mf-ends"><span><b>${escapeHtml(first?.name)}</b>${escapeHtml(first?.rt || first?.time || '')}</span><span class="mf-pct">${pct} %</span><span><b>${escapeHtml(last?.name)}</b>${escapeHtml(last?.rt || last?.time || '')}</span></div>
             </div>
-            ${next ? `<div class="mf-next"><small>Nächster Halt</small><strong>${escapeHtml(next.name)}</strong><span>${escapeHtml(next.rt || next.time)} ${delayHtml(v.delay)}</span></div>` : ''}
+            ${next ? `<div class="mf-next"><small>Nächster Halt</small><strong>${escapeHtml(next.name)}</strong><span>${escapeHtml(next.rt || next.time)} ${delayHtml(next.delay != null ? next.delay : v.delay)}</span></div>` : ''}
             ${changeNotes}
             <div class="mf-scroll">
                 ${passedCount ? `<div class="mf-passed">${passedCount} ${passedCount === 1 ? 'Halt' : 'Halte'} bereits gefahren</div>` : ''}
