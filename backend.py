@@ -3014,10 +3014,16 @@ def get_radar():
                         next_stop = loc_l[lx].get('name', '')
                     if t_r and t_s:
                         try:
-                            def to_min(v):
+                            def to_sec(v):
                                 v = v[-6:]
-                                return int(v[0:2]) * 60 + int(v[2:4])
-                            delay_min = to_min(t_r) - to_min(t_s)
+                                return int(v[0:2]) * 3600 + int(v[2:4]) * 60 + int(v[4:6] or 0)
+                            diff = to_sec(t_r) - to_sec(t_s)
+                            if diff > 43200:
+                                diff -= 86400
+                            elif diff < -43200:
+                                diff += 86400
+                            # round to whole minutes like the departure boards (30 s early is still on time)
+                            delay_min = int(diff / 60.0 + (0.5 if diff >= 0 else -0.5)) if abs(diff) >= 30 else 0
                         except Exception:
                             delay_min = None
                     break
