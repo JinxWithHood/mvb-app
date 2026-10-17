@@ -5818,9 +5818,48 @@ body.map-fullscreen .tab-nav-mobile {
   color: var(--text-secondary);
 }
 
+.map-loading-track {
+  position: relative;
+  width: min(380px, 80%);
+  height: 44px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+/* the tram drives in from the left, glides through and leaves on the right – on repeat */
 .map-loading-tram {
-  width: 180px;
-  animation: tramIdle 1.2s ease-in-out infinite;
+  position: absolute;
+  left: 0;
+  bottom: 7px;
+  width: 170px;
+  max-width: none;
+  animation: mapTramRun 2.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+.map-loading-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  height: 5px;
+  border-top: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  background: repeating-linear-gradient(90deg, var(--text-muted) 0 3px, transparent 3px 11px);
+  opacity: 0.55;
+}
+
+@keyframes mapTramRun {
+  0% { transform: translateX(-180px); }
+  100% { transform: translateX(400px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-loading-tram {
+    animation: none;
+    left: 50%;
+    transform: translateX(-50%);
+  }
 }
 
 .map-note {
