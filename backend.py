@@ -2907,7 +2907,14 @@ def get_radar():
         return jsonify({'error': f'Live-Positionen nicht verfügbar: {last_err}', 'vehicles': []}), 502
 
     if debug_raw:
-        sample = (res.get('jnyL') or [])[:2]
+        match = request.args.get('match')
+        jl = res.get('jnyL') or []
+        sample = [j for j in jl if match and match in (j.get('jid') or '')][:2] if match else jl[:2]
+        loc_names = [l.get('name') for l in (res.get('common') or {}).get('locL', [])]
+        for j in sample:
+            j['_stopNames'] = [loc_names[st['locX']] if st.get('locX') is not None and st['locX'] < len(loc_names) else None
+                               for st in j.get('stopL') or []]
+            j.pop('ani', None)
         return jsonify({'keys': list(res.keys()), 'commonKeys': list((res.get('common') or {}).keys()),
                         'count': len(res.get('jnyL') or []), 'sample': sample,
                         'prodSample': (res.get('common') or {}).get('prodL', [])[:3],
