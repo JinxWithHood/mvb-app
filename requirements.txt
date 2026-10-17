@@ -4,4 +4,5 @@ pyhafas
 requests
 beautifulsoup4
 pytz
+cryptography
 gunicorn

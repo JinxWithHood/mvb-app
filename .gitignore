@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Laufzeit-Daten (Caches, Push-Abos, Schlüssel) – nie ins Repo!
+cache/*
+!cache/.gitkeep
+
+# Lokales Archiv (alte Skripte, Backups)
+_archiv/
+
+# System
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -92,6 +92,45 @@ def patched_format_products_filter(self, requested_products: dict) -> dict:
 
 BaseProfile.format_products_filter = patched_format_products_filter
 
+# ---------------------------------------------------------------------------
+# Monkeypatch BaseStationBoardRequest.parse_station_board_request
+# ---------------------------------------------------------------------------
+from pyhafas.profile.base import BaseStationBoardRequest
+
+original_parse_station_board_request = BaseStationBoardRequest.parse_station_board_request
+
+def patched_parse_station_board_request(self, data, departure_arrival_prefix: str):
+    legs = original_parse_station_board_request(self, data, departure_arrival_prefix)
+    if data and hasattr(data, 'res') and isinstance(data.res, dict):
+        jnyL = data.res.get('jnyL', [])
+        common = getattr(data, 'common', {}) or {}
+        remL = common.get('remL', [])
+        himL = common.get('himL', [])
+        for i, leg in enumerate(legs):
+            if i < len(jnyL):
+                raw_leg = jnyL[i]
+                leg_msgs = []
+                leg_hims = []
+                for m in raw_leg.get('msgL', []):
+                    m_type = m.get('type')
+                    if m_type == 'REM':
+                        rx = m.get('remX')
+                        if rx is not None and rx < len(remL):
+                            rem_item = remL[rx]
+                            leg_msgs.append(rem_item.get('txtN') or rem_item.get('txtL') or '')
+                    elif m_type == 'HIM':
+                        hx = m.get('himX')
+                        if hx is not None and hx < len(himL):
+                            him_item = himL[hx]
+                            leg_hims.append(him_item)
+                leg.messages = leg_msgs
+                leg.him_messages = leg_hims
+                leg.raw_jny = raw_leg
+    return legs
+
+BaseStationBoardRequest.parse_station_board_request = patched_parse_station_board_request
+
+
 def get_profile_products(client, allowed_modes):
     """
     Map generalized allowed_modes keys to profile-specific product names.
@@ -182,7 +221,12 @@ class OEBBProfile(DBProfile):
 # ---------------------------------------------------------------------------
 # Flask App Initialisation
 # ---------------------------------------------------------------------------
-app = Flask(__name__, static_folder='.', static_url_path='')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PUBLIC_DIR = os.path.join(BASE_DIR, 'public')   # only this folder is served to the browser
+CACHE_DIR = os.path.join(BASE_DIR, 'cache')     # runtime caches (not part of the repo)
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
 CORS(app)
 
 @app.after_request
@@ -561,6 +605,72 @@ def clean_request_stop_note(note_text: str, stop_name: str = "") -> str:
     return t
 
 
+def normalize_station_name(name: str) -> str:
+    """Normalize station names for comparison and route matching."""
+    if not name:
+        return ""
+    n = name.lower().replace("magdeburg,", "").replace("magdeburg", "")
+    n = re.sub(r'\(.*?\)', '', n)
+    n = n.replace("straße", "str.").replace("strasse", "str.")
+    n = n.replace("hauptbahnhof", "hbf").replace("s-bahnhof", "s-bf")
+    return re.sub(r'\s+', ' ', n).strip()
+
+
+def detect_diversion(line_name: str, direction: str, messages: list = None,
+                     him_messages: list = None, station_name: str = None) -> dict:
+    """
+    Detects if a trip or departure is affected by an active diversion (Umleitung).
+    Returns a dictionary with full diversion parameters or None.
+    """
+    messages = messages or []
+    him_messages = him_messages or []
+    line_norm = normalize_line_name(line_name)
+    stat_norm = normalize_station_name(station_name or "")
+
+    # Generic HIM / Umleitung parsing (only real HAFAS messages, no hard-coded routes)
+    for him in him_messages:
+        head = him.get('head', '')
+        text = him.get('text', '')
+        comb = head + " " + text
+        if 'umleitung' in comb.lower() or 'gesperrt' in comb.lower():
+            m_route = re.search(
+                r'Die\s+(?:Linie\s+|Str\s+|Bus\s*)?(\d+|[A-Z0-9]+)\s+fährt\s+ab\s+([A-Za-z0-9\.\-\s]+?)\s+Umleitung(?:\s+als\s+Ringfahrt)?\s+über\s+(.+?)\s+zur\s+Haltestelle\s+([^,\.]+)',
+                comb, re.IGNORECASE
+            )
+            if m_route and normalize_line_name(m_route.group(1)) == line_norm:
+                from_st = m_route.group(2).strip()
+                via_str = m_route.group(3).strip()
+                to_st = m_route.group(4).strip()
+                
+                cancelled_list = []
+                m_canc = re.search(r'Die\s+Haltestellen\s+(.+?)\s+entfallen', comb, re.IGNORECASE)
+                if m_canc:
+                    cancelled_list = [s.strip() for s in re.split(r'[,und]+', m_canc.group(1)) if s.strip()]
+                    
+                repl_str = ""
+                m_repl = re.search(r'Ersatzverkehr(?:\s+Richtung\s+[^:]+)?:?\s*(.+)', comb, re.IGNORECASE)
+                if m_repl:
+                    repl_str = m_repl.group(1).strip()
+                    
+                st_canc = any(normalize_station_name(cs) in stat_norm for cs in cancelled_list if stat_norm)
+                return {
+                    "isDiverted": True,
+                    "title": head or "Umleitung",
+                    "text": re.sub(r'<[^>]+>', ' ', text).strip(),
+                    "line": line_norm,
+                    "fromStation": from_st,
+                    "originalDirection": direction,
+                    "newDirection": to_st,
+                    "cancelledStops": cancelled_list,
+                    "diversionStops": [s.strip() for s in re.split(r'[,und]+', via_str) if s.strip()] + [to_st],
+                    "replacement": repl_str,
+                    "stationCancelled": st_canc
+                }
+
+    return None
+
+
+
 def get_line_color(line_name: str, operator_name: str = None) -> str:
     """
     Look up the canonical hex colour for a transit line.
@@ -798,7 +908,7 @@ def generate_fallback_journey(line: str, direction: str, start_time_str: str,
 @app.route('/')
 def index():
     """Serve the frontend SPA."""
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(PUBLIC_DIR, 'index.html')
 
 
 # -------------------------------------------------------------------
@@ -1085,6 +1195,34 @@ def get_departures():
                 # Realtime status
                 rt_status = _realtime_status(delay, cancelled)
 
+                # Diversion detection & handling
+                dep_msgs = getattr(dep, 'messages', [])
+                dep_hims = getattr(dep, 'him_messages', [])
+                req_station_name = request.args.get('station_name', '')
+                if not req_station_name and hasattr(dep, 'station') and dep.station:
+                    req_station_name = getattr(dep.station, 'name', '')
+
+                div_info = detect_diversion(
+                    line_name=line_name,
+                    direction=dep.direction,
+                    messages=dep_msgs,
+                    him_messages=dep_hims,
+                    station_name=req_station_name
+                )
+
+                is_diverted = False
+                original_direction = None
+                dep_direction = dep.direction
+                if div_info:
+                    is_diverted = True
+                    original_direction = dep.direction
+                    dep_direction = div_info["newDirection"]
+                    if not div_info.get("stationCancelled", False):
+                        cancelled = False
+                    else:
+                        cancelled = True
+                    rt_status = _realtime_status(delay, cancelled)
+
                 # Day offset
                 day_offset = 0
                 if dep.dateTime:
@@ -1113,7 +1251,11 @@ def get_departures():
                     "journey_id": dep_raw_id,
                     "line": line_name,
                     "raw_line": line_name,
-                    "direction": dep.direction,
+                    "direction": dep_direction,
+                    "originalDirection": original_direction if is_diverted else None,
+                    "isDiverted": is_diverted,
+                    "diversion": div_info if is_diverted else None,
+                    "diversionInfo": (div_info["title"] + ": " + div_info["text"]) if is_diverted else None,
                     "time": time_str,
                     "delay": delay,
                     "type": line_type,
@@ -1127,6 +1269,7 @@ def get_departures():
                     "platform": platform,
                     "operator": dep_op or ("HSB" if line_type == "hsb" else None)
                 })
+
             return jsonify(result)
     except Exception as e:
         print(f"[ERROR] HAFAS departures: {e}")
@@ -1589,6 +1732,86 @@ def get_journey():
         if sev_info and not any(sev_info.lower() in m.get("text", "").lower() for m in messages):
             messages.insert(0, {"text": sev_info, "warning": False, "is_sev": True})
 
+        # ---- Detect and Handle Diversions (Umleitungen) ----
+        himL = common.get('himL', [])
+        journey_hims = []
+        for m in msgL:
+            if m.get('type') == 'HIM':
+                hx = m.get('himX')
+                if hx is not None and hx < len(himL):
+                    journey_hims.append(himL[hx])
+
+        div_info = detect_diversion(
+            line_name=journey_line,
+            direction=journey_direction,
+            messages=[m.get('text', '') for m in messages],
+            him_messages=journey_hims or himL,
+            station_name=station_name
+        )
+
+        is_diverted = False
+        if div_info:
+            is_diverted = True
+            journey_direction = div_info["newDirection"]
+
+            # Filter out cancelled / ghost stops from the regular schedule that occur after deviation point
+            dev_station_norm = normalize_station_name(div_info["fromStation"])
+            
+            cleaned_stops = []
+            dev_reached = False
+            dev_idx = -1
+            
+            for s_idx, s in enumerate(stops):
+                s_name_norm = normalize_station_name(s["name"])
+                
+                if dev_station_norm in s_name_norm or s_name_norm in dev_station_norm:
+                    dev_reached = True
+                
+                # Check if this stop is one of the explicitly cancelled stops
+                is_cancelled_target = any(normalize_station_name(cs) in s_name_norm or s_name_norm in normalize_station_name(cs) for cs in div_info.get("cancelledStops", []))
+                if is_cancelled_target:
+                    continue
+                
+                # Skip duplicate / scheduled ghost stops after the diversion point that were cancelled
+                if dev_reached and s.get("cancelled", False):
+                    continue
+                
+                cleaned_stops.append(s)
+                if dev_reached and dev_idx == -1 and (dev_station_norm in s_name_norm or s_name_norm in dev_station_norm):
+                    dev_idx = len(cleaned_stops) - 1
+
+            if len(cleaned_stops) > 0:
+                stops = cleaned_stops
+
+            # Tag only the diversion loop stops with isDiversion = True
+            div_names_norm = [normalize_station_name(ds) for ds in div_info.get("diversionStops", [])]
+            for s in stops:
+                s_name_norm = normalize_station_name(s["name"])
+                if any(dn in s_name_norm or s_name_norm in dn for dn in div_names_norm):
+                    s["isDiversion"] = True
+                else:
+                    s["isDiversion"] = False
+
+            # Recompute vehicle position and progress
+            vehicle_pos = 0
+            for i, s in enumerate(stops):
+                if s.get("passed", False):
+                    vehicle_pos = i
+                s["isVehicleHere"] = False
+            if 0 <= vehicle_pos < len(stops):
+                stops[vehicle_pos]["isVehicleHere"] = True
+            total_stops = len(stops)
+            progress = int((vehicle_pos / max(total_stops - 1, 1)) * 100) if total_stops > 0 else 0
+
+            # Informative diversion banner built from the real HAFAS message
+            cancelled_txt = ', '.join(div_info.get('cancelledStops', []))
+            div_alert_text = f"Umleitung: Fahrt verkehrt ab {div_info.get('fromStation', '')} über eine geänderte Strecke zur {journey_direction}."
+            if cancelled_txt:
+                div_alert_text += f" Haltestellen {cancelled_txt} entfallen."
+            if div_info.get('replacement'):
+                div_alert_text += f" {div_info['replacement']}"
+            messages = [{"text": div_alert_text, "warning": True, "is_diversion": True}] + messages
+
         return jsonify({
             "line": journey_line,
             "direction": journey_direction,
@@ -1603,6 +1826,9 @@ def get_journey():
             "isSEV": (j_type == "sev"),
             "sev_info": sev_info,
             "transitionColor": transition_color,
+            "isDiverted": is_diverted,
+            "diversion": div_info if is_diverted else None,
+            "cancelledStops": div_info.get("cancelledStops") if is_diverted else None,
             "operator": operator_name
         })
 
@@ -1910,42 +2136,8 @@ def get_disruptions():
         print(f"[ERROR] Disruptions scraping: {e}")
         traceback.print_exc()
 
-    # ---- Fallback disruptions if scraping fails ----
-    now_iso = datetime.datetime.now(local_tz).isoformat()
-    return jsonify([
-        {
-            "id": hashlib.md5(b"Linie 57: Verspaetungen wegen technischem Defekt").hexdigest()[:8],
-            "title": "Linie 57: Verspätungen wegen technischem Defekt",
-            "desc": ("Linie 57: Nach einem technischen Defekt kommt es auf der "
-                     "gesamten Linie zu Verspätungen. Wir bitten um Geduld."),
-            "time": "Aktuell",
-            "lines": ["Linie 57"],
-            "critical": False,
-            "timestamp": now_iso,
-        },
-        {
-            "id": hashlib.md5(b"Linie 61: Umleitung wegen Rohrbruch").hexdigest()[:8],
-            "title": "Linie 61: Umleitung wegen Rohrbruch in Rottersdorfer Straße",
-            "desc": ("Linie 61: Aufgrund eines Rohrbruchs in der Rottersdorfer Straße "
-                     "können die Haltestellen Eiskellerplatz und Sudenburg nicht "
-                     "angefahren werden. Die Busse werden umgeleitet."),
-            "time": "Aktuell",
-            "lines": ["Linie 61"],
-            "critical": True,
-            "timestamp": now_iso,
-        },
-        {
-            "id": hashlib.md5(b"Linie 51: Haltestelle Heyrothsberge entfaellt").hexdigest()[:8],
-            "title": "Linie 51: Haltestelle Heyrothsberge entfällt wegen Baustelle",
-            "desc": ("Linie 51: Wegen einer Baustelle auf der Bundesstraße 1 kann "
-                     "die Haltestelle Heyrothsberge nicht angefahren werden. "
-                     "Ersatzhaltestellen sind eingerichtet."),
-            "time": "Aktuell",
-            "lines": ["Linie 51"],
-            "critical": False,
-            "timestamp": now_iso,
-        }
-    ])
+    # Scraping failed: report an error instead of showing invented disruptions
+    return jsonify({"error": "Verkehrsmelder derzeit nicht erreichbar"}), 502
 
 
 # -------------------------------------------------------------------
@@ -2422,6 +2614,1265 @@ def get_news_article():
 # ===================================================================
 #  SERVER STARTUP
 # ===================================================================
+# ===================================================================
+#  LIVE-NETZKARTE: Tram network geometry + live vehicle positions
+# ===================================================================
+NETWORK_BBOX = (52.03, 11.50, 52.23, 11.78)  # south, west, north, east
+NETWORK_CACHE_FILE = os.path.join(CACHE_DIR, 'network_cache.json')
+NETWORK_CACHE_MAX_AGE = 7 * 24 * 3600
+OVERPASS_ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+]
+NETWORK_LINES_WANTED = ['1N', '1S', '1', '2', '3', '4', '5', '6', '8', '9', '10', '13']
+
+
+def _dp_simplify(points, eps):
+    """Douglas-Peucker polyline simplification (points = [[lat, lon], ...])."""
+    if len(points) < 3:
+        return points
+    ax, ay = points[0]
+    bx, by = points[-1]
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    dmax, idx = 0.0, 0
+    for i in range(1, len(points) - 1):
+        px, py = points[i]
+        t = ((px - ax) * dx + (py - ay) * dy) / length_sq if length_sq else 0
+        t = max(0.0, min(1.0, t))
+        ex, ey = ax + t * dx - px, ay + t * dy - py
+        d = (ex * ex + ey * ey) ** 0.5
+        if d > dmax:
+            dmax, idx = d, i
+    if dmax > eps:
+        left = _dp_simplify(points[:idx + 1], eps)
+        right = _dp_simplify(points[idx:], eps)
+        return left[:-1] + right
+    return [points[0], points[-1]]
+
+
+def _chain_ways(ways):
+    """Join ordered OSM way geometries of a route relation into continuous polylines."""
+    def same(p, q):
+        return abs(p[0] - q[0]) < 1e-6 and abs(p[1] - q[1]) < 1e-6
+
+    segments, cur, first_len = [], None, None
+    for w in ways:
+        if cur is None:
+            cur, first_len = list(w), len(w)
+            continue
+        if same(cur[-1], w[0]):
+            cur += w[1:]
+        elif same(cur[-1], w[-1]):
+            cur += list(reversed(w))[1:]
+        elif len(cur) == first_len and same(cur[0], w[0]):
+            cur = list(reversed(cur)) + w[1:]
+        elif len(cur) == first_len and same(cur[0], w[-1]):
+            cur = list(reversed(cur)) + list(reversed(w))[1:]
+        else:
+            segments.append(cur)
+            cur, first_len = list(w), len(w)
+    if cur:
+        segments.append(cur)
+    return [[[round(p[0], 5), round(p[1], 5)] for p in _dp_simplify(seg, 0.00002)] for seg in segments]
+
+
+def _build_network_from_overpass():
+    s, w, n, e = NETWORK_BBOX
+    query = (
+        f'[out:json][timeout:120];'
+        f'rel["route"="tram"]({s},{w},{n},{e})->.r;'
+        f'.r out geom;'
+        f'node(r.r)["name"];'
+        f'out tags;'
+        f'way["railway"="tram"]({s},{w},{n},{e});'
+        f'out geom;'
+    )
+    data = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            resp = requests.post(endpoint, data={'data': query}, timeout=90,
+                                 headers={'User-Agent': 'MagdeburgMobil/6 (private hobby project)'})
+            if resp.ok:
+                data = resp.json()
+                break
+            print(f"[WARN] Overpass {endpoint} -> HTTP {resp.status_code}")
+        except Exception as ex:
+            print(f"[WARN] Overpass {endpoint} failed: {ex}")
+    if not data:
+        return None
+
+    names = {el['id']: el.get('tags', {}).get('name', '')
+             for el in data.get('elements', []) if el.get('type') == 'node'}
+
+    lines, seen = [], set()
+    stops_by_id = {}
+    for el in data.get('elements', []):
+        if el.get('type') != 'relation':
+            continue
+        tags = el.get('tags', {})
+        ref = (tags.get('ref') or '').strip()
+        if ref not in NETWORK_LINES_WANTED or ref in seen:
+            continue
+        if tags.get('route') != 'tram':
+            continue
+        seen.add(ref)
+        ways = [[[g['lat'], g['lon']] for g in m['geometry']]
+                for m in el.get('members', [])
+                if m.get('type') == 'way' and m.get('geometry') and m.get('role', '') in ('', 'forward', 'backward')]
+        line_key = re.sub(r'[NS]$', '', ref)  # "1N"/"1S" -> "1"
+        for m in el.get('members', []):
+            if m.get('type') == 'node' and 'stop' in (m.get('role') or '') and 'lat' in m:
+                sid = m['ref']
+                st = stops_by_id.setdefault(sid, {
+                    'id': sid, 'lat': round(m['lat'], 5), 'lon': round(m['lon'], 5),
+                    'name': names.get(sid, ''), 'lines': []
+                })
+                if line_key not in st['lines']:
+                    st['lines'].append(line_key)
+        lines.append({
+            'ref': line_key,
+            'variant': ref,
+            'color': LINE_COLORS.get(line_key, '#888888'),
+            'from': tags.get('from', ''),
+            'to': tags.get('to', ''),
+            'segs': _chain_ways(ways),
+        })
+
+    # merge stop positions with the same name (both platforms) into one station dot
+    stations = {}
+    for st in stops_by_id.values():
+        key = st['name'] or f"#{st['id']}"
+        if key in stations:
+            s0 = stations[key]
+            s0['_n'] += 1
+            s0['lat'] += (st['lat'] - s0['lat']) / s0['_n']
+            s0['lon'] += (st['lon'] - s0['lon']) / s0['_n']
+            s0['lines'] = sorted(set(s0['lines']) | set(st['lines']), key=lambda x: int(re.sub(r'\D', '', x) or 0))
+        else:
+            stations[key] = dict(st, _n=1)
+    station_list = [{'name': v['name'], 'lat': round(v['lat'], 5), 'lon': round(v['lon'], 5), 'lines': v['lines']}
+                    for v in stations.values() if v['name']]
+
+    # Physical track network (every railway=tram way, incl. Wendeschleifen and depots)
+    tracks = []
+    for el in data.get('elements', []):
+        if el.get('type') == 'way' and el.get('geometry') and (el.get('tags') or {}).get('railway') == 'tram':
+            pts = [[g['lat'], g['lon']] for g in el['geometry']]
+            simp = _dp_simplify(pts, 0.000008)
+            tracks.append([[round(p[0], 5), round(p[1], 5)] for p in simp])
+
+    lines.sort(key=lambda l: int(re.sub(r'\D', '', l['ref']) or 0))
+    return {
+        'v': 2,
+        'tracks': tracks,
+        'generated': datetime.datetime.now(local_tz).isoformat(),
+        'source': '© OpenStreetMap-Mitwirkende (ODbL)',
+        'bbox': NETWORK_BBOX,
+        'lines': lines,
+        'stations': station_list,
+    }
+
+
+@app.route('/api/network')
+def get_network():
+    """Tram network geometry (from OpenStreetMap via Overpass), cached on disk for 7 days."""
+    force = request.args.get('refresh') == '1'
+    cached = None
+    if os.path.exists(NETWORK_CACHE_FILE):
+        try:
+            with open(NETWORK_CACHE_FILE, 'r', encoding='utf-8') as f:
+                cached = json.load(f)
+        except Exception:
+            cached = None
+        age = time.time() - os.path.getmtime(NETWORK_CACHE_FILE)
+        if cached and cached.get('v') == 2 and age < NETWORK_CACHE_MAX_AGE and not force:
+            return jsonify(cached)
+
+    fresh = _build_network_from_overpass()
+    if fresh and fresh.get('lines'):
+        try:
+            with open(NETWORK_CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(fresh, f, ensure_ascii=False)
+        except Exception as ex:
+            print(f"[WARN] Could not write network cache: {ex}")
+        return jsonify(fresh)
+    if cached:
+        return jsonify(cached)
+    return jsonify({'error': 'Netzdaten derzeit nicht verfügbar', 'lines': [], 'stations': []}), 503
+
+
+def _decode_hafas_polyline(encoded, precision=5):
+    """Decode a Google-encoded polyline (HAFAS crdEncYX) to [[lat, lon], ...]."""
+    coords, index, lat, lon = [], 0, 0, 0
+    factor = 10 ** precision
+    length = len(encoded)
+    while index < length:
+        for which in (0, 1):
+            shift, result = 0, 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(result >> 1) if (result & 1) else (result >> 1)
+            if which == 0:
+                lat += delta
+            else:
+                lon += delta
+        coords.append([lat / factor, lon / factor])
+    return coords
+
+
+def _point_along(poly, cum, frac):
+    """Point at fraction (0..1) of the total length of a polyline."""
+    if not poly:
+        return None
+    if len(poly) == 1 or cum[-1] <= 0:
+        return poly[0]
+    target = max(0.0, min(1.0, frac)) * cum[-1]
+    for i in range(1, len(cum)):
+        if cum[i] >= target:
+            seg = cum[i] - cum[i - 1]
+            t = (target - cum[i - 1]) / seg if seg > 0 else 0
+            return [poly[i - 1][0] + (poly[i][0] - poly[i - 1][0]) * t,
+                    poly[i - 1][1] + (poly[i][1] - poly[i - 1][1]) * t]
+    return poly[-1]
+
+
+def _classify_radar_product(prod):
+    name = (prod.get('name') or '').strip()
+    low = name.lower()
+    cat = ((prod.get('prodCtx') or {}).get('catOut') or (prod.get('prodCtx') or {}).get('catOutS') or '').lower()
+    if low.startswith('str') or 'tram' in low or cat in ('str', 'tram'):
+        return 'tram'
+    if low.startswith('bus') or cat.startswith('bus'):
+        return 'bus'
+    if low.startswith('s') and re.match(r'^s\s*\d', low):
+        return 'sbahn'
+    if any(low.startswith(k) for k in ('re', 'rb', 'hex', 'erb')):
+        return 'regional'
+    if any(low.startswith(k) for k in ('ice', 'ic', 'ec')):
+        return 'express'
+    return classify_line_type(name, operator_name=None)
+
+
+_radar_cache = {'ts': 0, 'data': None}
+
+
+@app.route('/api/radar')
+def get_radar():
+    """Live vehicle positions in Magdeburg via HAFAS JourneyGeoPos (with short animation tracks)."""
+    debug_raw = request.args.get('raw') == '1'
+    now_ts = time.time()
+    if not debug_raw and _radar_cache['data'] and now_ts - _radar_cache['ts'] < 8:
+        return jsonify(_radar_cache['data'])
+
+    client = nasa_client or oebb_client
+    if client is None:
+        return jsonify({'error': 'Kein HAFAS-Client verfügbar', 'vehicles': []}), 503
+
+    s, w, n, e = NETWORK_BBOX
+    now = datetime.datetime.now(local_tz)
+    duration_s = 40
+    base_req = {
+        'maxJny': 400,
+        'onlyRT': False,
+        'date': now.strftime('%Y%m%d'),
+        'time': now.strftime('%H%M%S'),
+        'rect': {
+            'llCrd': {'x': int(w * 1e6), 'y': int(s * 1e6)},
+            'urCrd': {'x': int(e * 1e6), 'y': int(n * 1e6)},
+        },
+        'perSize': duration_s * 1000,
+        'perStep': 5000,
+        'ageOfReport': True,
+        'trainPosMode': 'CALC',
+    }
+
+    res, last_err = None, None
+    for extra in ({},):  # polylines are delivered via common.polyL anyway
+        try:
+            req_body = dict(base_req, **extra)
+            res = client.profile.request({'meth': 'JourneyGeoPos', 'req': req_body}).res
+            if res is not None:
+                break
+        except Exception as ex:
+            last_err = ex
+            print(f"[WARN] JourneyGeoPos failed ({'with' if extra else 'without'} polyline): {ex}")
+    if res is None:
+        return jsonify({'error': f'Live-Positionen nicht verfügbar: {last_err}', 'vehicles': []}), 502
+
+    if debug_raw:
+        sample = (res.get('jnyL') or [])[:2]
+        return jsonify({'keys': list(res.keys()), 'commonKeys': list((res.get('common') or {}).keys()),
+                        'count': len(res.get('jnyL') or []), 'sample': sample,
+                        'prodSample': (res.get('common') or {}).get('prodL', [])[:3],
+                        'polySample': (res.get('common') or {}).get('polyL', [])[:1]})
+
+    common = res.get('common') or {}
+    prod_l = common.get('prodL') or []
+    poly_l = common.get('polyL') or []
+    loc_l = common.get('locL') or []
+    vehicles = []
+
+    for jny in res.get('jnyL') or []:
+        try:
+            prod = prod_l[jny['prodX']] if 'prodX' in jny and jny['prodX'] < len(prod_l) else {}
+            name = (prod.get('name') or prod.get('nameS') or '').strip()
+            if not name:
+                continue
+            vtype = _classify_radar_product(prod)
+            short = (prod.get('nameS') or (prod.get('prodCtx') or {}).get('line') or re.sub(r'^(Str|Bus|Tram)\s*', '', name)).strip()
+            pos = jny.get('pos') or {}
+            if 'x' not in pos or 'y' not in pos:
+                continue
+            lat, lon = pos['y'] / 1e6, pos['x'] / 1e6
+
+            # Animation track: HAFAS gives, per frame, the segment (from-stop -> to-stop)
+            # and the progress in percent on that segment; we map it onto the polyline.
+            track = []
+            ani = jny.get('ani') or {}
+            poly = None
+            if ani.get('poly') and ani['poly'].get('crdEncYX'):
+                poly = _decode_hafas_polyline(ani['poly']['crdEncYX'])
+            elif ani.get('polyG') and ani['polyG'].get('polyXL'):
+                px = ani['polyG']['polyXL'][0]
+                if px < len(poly_l) and poly_l[px].get('crdEncYX'):
+                    poly = _decode_hafas_polyline(poly_l[px]['crdEncYX'])
+            m_sec = ani.get('mSec') or []
+            proc = ani.get('proc') or []
+            f_loc = ani.get('fLocX') or []
+            t_loc = ani.get('tLocX') or []
+
+            def loc_crd(ix):
+                if ix is None or ix < 0 or ix >= len(loc_l):
+                    return None
+                c = loc_l[ix].get('crd') or {}
+                if 'x' in c and 'y' in c:
+                    return [c['y'] / 1e6, c['x'] / 1e6]
+                return None
+
+            def nearest_idx(pt, start=0):
+                best, best_i = None, None
+                for i in range(start, len(poly)):
+                    d = (poly[i][0] - pt[0]) ** 2 + ((poly[i][1] - pt[1]) * 0.615) ** 2
+                    if best is None or d < best:
+                        best, best_i = d, i
+                return best_i
+
+            proc_abs = ani.get('procAbs') or []
+            if poly and len(poly) > 1 and m_sec and len(proc_abs) == len(m_sec):
+                # The movement polyline covers exactly the path driven during the period
+                # (starts at the current position). procAbs grows monotonically along it.
+                cum = [0.0]
+                for k in range(1, len(poly)):
+                    dl = poly[k][0] - poly[k - 1][0]
+                    dn = (poly[k][1] - poly[k - 1][1]) * 0.615
+                    cum.append(cum[-1] + (dl * dl + dn * dn) ** 0.5)
+                p0, p1 = proc_abs[0], proc_abs[-1]
+                span = (p1 - p0) if p1 != p0 else 0
+                for t_ms, pa in zip(m_sec, proc_abs):
+                    frac = ((pa - p0) / span) if span else 0.0
+                    pt = _point_along(poly, cum, frac)
+                    if pt:
+                        track.append([int(t_ms), round(pt[0], 6), round(pt[1], 6)])
+            elif m_sec and len(proc) == len(m_sec):
+                for i, t_ms in enumerate(m_sec):
+                    frac = max(0.0, min(1.0, proc[i] / 100.0))
+                    o = loc_crd(f_loc[i]) if i < len(f_loc) else None
+                    d = loc_crd(t_loc[i]) if i < len(t_loc) else None
+                    pt = None
+                    if poly and len(poly) > 1 and o and d:
+                        io = nearest_idx(o)
+                        idd = nearest_idx(d, io) if io is not None else None
+                        if io is not None and idd is not None and idd > io:
+                            sub = poly[io:idd + 1]
+                            cum = [0.0]
+                            for k in range(1, len(sub)):
+                                dl = sub[k][0] - sub[k - 1][0]
+                                dn = (sub[k][1] - sub[k - 1][1]) * 0.615
+                                cum.append(cum[-1] + (dl * dl + dn * dn) ** 0.5)
+                            pt = _point_along(sub, cum, frac)
+                    if pt is None and o and d:
+                        pt = [o[0] + (d[0] - o[0]) * frac, o[1] + (d[1] - o[1]) * frac]
+                    if pt:
+                        track.append([int(t_ms), round(pt[0], 6), round(pt[1], 6)])
+
+            # Next stop + current delay from the stop list
+            now_hms = now.strftime('%H%M%S')
+            next_stop, delay_min = '', None
+            for st in jny.get('stopL') or []:
+                t_r = st.get('aTimeR') or st.get('dTimeR')
+                t_s = st.get('aTimeS') or st.get('dTimeS')
+                if t_s and (t_r or t_s)[-6:] >= now_hms:
+                    lx = st.get('locX')
+                    if lx is not None and lx < len(loc_l):
+                        next_stop = loc_l[lx].get('name', '')
+                    if t_r and t_s:
+                        try:
+                            def to_min(v):
+                                v = v[-6:]
+                                return int(v[0:2]) * 60 + int(v[2:4])
+                            delay_min = to_min(t_r) - to_min(t_s)
+                        except Exception:
+                            delay_min = None
+                    break
+
+            line_key = normalize_line_name(name)
+            color = get_line_color(name) if vtype in ('tram', 'bus', 'sev') else LINE_COLORS.get(line_key, '#64748b')
+            if vtype == 'sbahn':
+                color = '#00975F'
+            elif vtype in ('regional', 'express'):
+                color = '#E30513'
+
+            vehicles.append({
+                'id': jny.get('jid'),
+                'line': name,
+                'short': short,
+                'type': 'sev' if vtype == 'sev' else vtype,
+                'direction': jny.get('dirTxt', ''),
+                'lat': round(lat, 6),
+                'lon': round(lon, 6),
+                'color': color,
+                'track': track,
+                'nextStop': next_stop,
+                'delay': delay_min,
+            })
+        except Exception as ex:
+            print(f"[WARN] radar parse: {ex}")
+
+    payload = {'ts': int(now_ts * 1000), 'duration': duration_s * 1000, 'vehicles': vehicles}
+    _radar_cache['ts'] = now_ts
+    _radar_cache['data'] = payload
+    return jsonify(payload)
+
+
+
+# -------------------------------------------------------------------
+# Trip geometry (current real route incl. line changes) via JourneyDetails
+# -------------------------------------------------------------------
+import threading
+
+_trip_cache = {}
+_TRIP_CACHE_TTL = 45
+
+
+def _hafas_dt(date_str, time_str):
+    """Combine HAFAS date (YYYYMMDD) and time (HHMMSS / DDHHMMSS) to an aware datetime."""
+    if not date_str or not time_str:
+        return None
+    try:
+        base = datetime.datetime.strptime(date_str, '%Y%m%d')
+        t = str(time_str)
+        days = 0
+        if len(t) > 6:
+            days = int(t[:-6])
+            t = t[-6:]
+        t = t.zfill(6)
+        dt = base + datetime.timedelta(days=days, hours=int(t[0:2]), minutes=int(t[2:4]), seconds=int(t[4:6]))
+        return local_tz.localize(dt) if hasattr(local_tz, 'localize') else dt.replace(tzinfo=local_tz)
+    except Exception:
+        return None
+
+
+def _fit_stops_to_shape(shape, coords):
+    """Monotonic assignment of stops to shape points minimising the total distance."""
+    m = len(shape)
+    INF = float('inf')
+    prev = None
+    back = []
+    for c in coords:
+        if c is None:
+            back.append(None)
+            continue
+        lat, lon = c
+        cost = [(((p[0] - lat) * 111.0) ** 2 + ((p[1] - lon) * 68.3) ** 2) ** 0.5 for p in shape]
+        cur = [INF] * m
+        arg = [0] * m
+        if prev is None:
+            cur = cost
+        else:
+            best, best_j = INF, 0
+            for j in range(m):
+                if prev[j] < best:
+                    best, best_j = prev[j], j
+                cur[j] = cost[j] + best
+                arg[j] = best_j
+        back.append(arg if prev is not None else None)
+        prev = cur
+    if prev is None:
+        return [None] * len(coords)
+    # backtrack
+    j = min(range(m), key=lambda k: (prev[k], k))
+    out = [None] * len(coords)
+    real = [i for i, c in enumerate(coords) if c is not None]
+    for pos in range(len(real) - 1, -1, -1):
+        i = real[pos]
+        out[i] = j
+        arg = back[i]
+        if arg is not None:
+            j = arg[j]
+    return out
+
+
+def _fetch_trip(jid, want_raw=False):
+    now_ts = time.time()
+    hit = _trip_cache.get(jid)
+    if hit and not want_raw and now_ts - hit[0] < _TRIP_CACHE_TTL:
+        return hit[1]
+
+    res, last_err = None, None
+    for client in [c for c in (nasa_client, oebb_client) if c is not None]:
+        for req in ({'jid': jid, 'getPolyline': True}, {'jid': jid}):
+            try:
+                r = client.profile.request({'meth': 'JourneyDetails', 'req': req}).res
+                if r and r.get('journey'):
+                    res = r
+                    break
+            except Exception as ex:
+                last_err = ex
+        if res:
+            break
+    if res is None:
+        raise RuntimeError(f'JourneyDetails fehlgeschlagen: {last_err}')
+    if want_raw:
+        j = res.get('journey', {})
+        c = res.get('common', {})
+        return {'journeyKeys': list(j.keys()), 'stop0': (j.get('stopL') or [None])[0],
+                'polyG': j.get('polyG'), 'polyKeys': list((c.get('polyL') or [{}])[0].keys()) if c.get('polyL') else None,
+                'ppLocRefL': ((c.get('polyL') or [{}])[0].get('ppLocRefL') or [])[:5] if c.get('polyL') else None,
+                'nStops': len(j.get('stopL') or [])}
+
+    journey = res.get('journey', {})
+    common = res.get('common', {})
+    prod_l = common.get('prodL') or []
+    loc_l = common.get('locL') or []
+    poly_l = common.get('polyL') or []
+    date_str = journey.get('date')
+    now = datetime.datetime.now(local_tz)
+
+    def prod_info(px):
+        prod = prod_l[px] if px is not None and 0 <= px < len(prod_l) else {}
+        name = (prod.get('name') or prod.get('nameS') or '').strip()
+        short = (prod.get('nameS') or (prod.get('prodCtx') or {}).get('line') or re.sub(r'^(Str|Bus|Tram)\s*', '', name)).strip()
+        vtype = _classify_radar_product(prod) if prod else 'bus'
+        color = get_line_color(name) if name else '#64748b'
+        if vtype == 'sbahn':
+            color = '#00975F'
+        elif vtype in ('regional', 'express'):
+            color = '#E30513'
+        return name, short, vtype, color
+
+    main_name, main_short, main_type, main_color = prod_info(journey.get('prodX'))
+
+    shape, pp_refs = [], []
+    poly_entry = None
+    if (journey.get('polyG') or {}).get('polyXL'):
+        px = journey['polyG']['polyXL'][0]
+        if px < len(poly_l):
+            poly_entry = poly_l[px]
+    elif journey.get('poly'):
+        poly_entry = journey['poly']
+    if poly_entry and poly_entry.get('crdEncYX'):
+        shape = _decode_hafas_polyline(poly_entry['crdEncYX'])
+        pp_refs = poly_entry.get('ppLocRefL') or []
+
+    stops = []
+    for st in journey.get('stopL') or []:
+        lx = st.get('locX')
+        loc = loc_l[lx] if lx is not None and lx < len(loc_l) else {}
+        crd = loc.get('crd') or {}
+        px = st.get('dProdX', st.get('aProdX', journey.get('prodX')))
+        name, short, vtype, color = prod_info(px)
+        planned = st.get('dTimeS') or st.get('aTimeS')
+        real = st.get('dTimeR') or st.get('aTimeR')
+        dt_p = _hafas_dt(date_str, planned)
+        dt_r = _hafas_dt(date_str, real) if real else None
+        ref_dt = dt_r or dt_p
+        delay = int(round((dt_r - dt_p).total_seconds() / 60)) if (dt_r and dt_p) else None
+        stops.append({
+            'name': (loc.get('name') or '').replace('Magdeburg, ', ''),
+            'lat': crd.get('y', 0) / 1e6 if crd else None,
+            'lon': crd.get('x', 0) / 1e6 if crd else None,
+            'time': dt_p.strftime('%H:%M') if dt_p else '',
+            'rt': dt_r.strftime('%H:%M') if dt_r else None,
+            'delay': delay,
+            'passed': bool(ref_dt and ref_dt < now),
+            'line': name or main_name,
+            'short': short or main_short,
+            'color': color,
+            'cancelled': bool(st.get('aCncl') or st.get('dCncl')),
+            '_locX': lx,
+            '_type': vtype,
+        })
+
+    # Map every stop to an index in the shape. HAFAS polylines sometimes contain extra
+    # bits (a second pass or the next circulation), so we do a monotonic best fit:
+    # stops must appear in order along the shape, ties go to the earliest point.
+    if shape:
+        idxs = _fit_stops_to_shape(shape, [(st['lat'], st['lon']) if st['lat'] else None for st in stops])
+        for st, ix in zip(stops, idxs):
+            st['shapeIdx'] = ix
+        valid = [ix for ix in idxs if ix is not None]
+        if valid:
+            a, b = min(valid), max(valid)
+            if a > 0 or b < len(shape) - 1:
+                shape = shape[a:b + 1]
+                for st in stops:
+                    if st.get('shapeIdx') is not None:
+                        st['shapeIdx'] -= a
+    for st in stops:
+        st.pop('_locX', None)
+
+    trip = {
+        'id': jid,
+        'line': main_name,
+        'short': main_short,
+        'type': main_type,
+        'color': main_color,
+        'direction': journey.get('dirTxt', ''),
+        'types': {st['short']: st.pop('_type', main_type) for st in stops},
+        'stops': stops,
+        'shape': [[round(p[0], 6), round(p[1], 6)] for p in shape],
+    }
+    _trip_cache[jid] = (now_ts, trip)
+    if len(_trip_cache) > 400:
+        for k in sorted(_trip_cache, key=lambda k: _trip_cache[k][0])[:100]:
+            _trip_cache.pop(k, None)
+    return trip
+
+
+@app.route('/api/trip')
+def get_trip():
+    jid = request.args.get('jid', '')
+    if not jid:
+        return jsonify({'error': 'jid fehlt'}), 400
+    try:
+        return jsonify(_fetch_trip(jid, want_raw=request.args.get('raw') == '1'))
+    except Exception as ex:
+        print(f"[WARN] trip {jid[:40]}: {ex}")
+        return jsonify({'error': str(ex)}), 502
+
+
+# -------------------------------------------------------------------
+# Current line shapes (built in the background from live trips)
+# -------------------------------------------------------------------
+LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes.json')
+LINE_SHAPES_MAX_AGE = 12 * 3600
+_line_shapes = {'loaded': False, 'lines': {}}
+_line_shapes_lock = threading.Lock()
+_line_shapes_worker = {'running': False}
+
+
+def _line_key(v):
+    group = 'tram' if v.get('type') == 'tram' else ('bus' if v.get('type') in ('bus', 'sev') else None)
+    if not group:
+        return None
+    return f"{group}:{v.get('short') or v.get('line')}"
+
+
+def _load_line_shapes():
+    if _line_shapes['loaded']:
+        return
+    _line_shapes['loaded'] = True
+    try:
+        if os.path.exists(LINE_SHAPES_FILE):
+            with open(LINE_SHAPES_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            cutoff = time.time() - LINE_SHAPES_MAX_AGE
+            for k, v in (data.get('lines') or {}).items():
+                v['shapes'] = {d: s for d, s in (v.get('shapes') or {}).items() if s.get('ts', 0) > cutoff}
+                if v['shapes']:
+                    _line_shapes['lines'][k] = v
+    except Exception as ex:
+        print(f"[WARN] line shapes cache: {ex}")
+
+
+def _save_line_shapes():
+    try:
+        with open(LINE_SHAPES_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'lines': _line_shapes['lines']}, f, ensure_ascii=False)
+    except Exception as ex:
+        print(f"[WARN] could not save line shapes: {ex}")
+
+
+def _line_shapes_job(jobs):
+    try:
+        for key, direction, jid, meta in jobs:
+            try:
+                trip = _fetch_trip(jid)
+            except Exception as ex:
+                print(f"[WARN] line shape {key}/{direction}: {ex}")
+                continue
+            shape = trip.get('shape') or []
+            if len(shape) < 2:
+                continue
+            pieces, changes = _split_trip_by_line(trip)
+            with _line_shapes_lock:
+                for pkey, pmeta, pts in pieces:
+                    simp = [[round(p[0], 5), round(p[1], 5)] for p in _dp_simplify(pts, 0.000008)]
+                    if len(simp) < 2:
+                        continue
+                    entry = _line_shapes['lines'].setdefault(pkey, dict(pmeta, shapes={}, changes={}))
+                    if pkey == key:
+                        entry.update(meta)
+                    entry.setdefault('changes', {})
+                    entry['shapes'][f"{direction}|{trip.get('short')}" if pkey != key else direction] = {'ts': time.time(), 'pts': simp}
+                for ch in changes:
+                    for ck in (ch['fromKey'], ch['toKey']):
+                        if ck in _line_shapes['lines']:
+                            _line_shapes['lines'][ck].setdefault('changes', {})[ch['id']] = dict(ch, ts=time.time())
+            time.sleep(0.25)  # be gentle with the HAFAS server
+        with _line_shapes_lock:
+            _save_line_shapes()
+    finally:
+        _line_shapes_worker['running'] = False
+
+
+def _split_trip_by_line(trip):
+    """Cut a trip shape into per-line pieces (a trip may change its line number on the way)."""
+    shape = trip.get('shape') or []
+    stops = [st for st in trip.get('stops') or [] if st.get('shapeIdx') is not None]
+    types = trip.get('types') or {}
+    pieces, changes = [], []
+    if len(stops) < 2:
+        key = _line_key({'type': trip.get('type'), 'short': trip.get('short'), 'line': trip.get('line')})
+        if key:
+            pieces.append((key, {'key': key, 'short': trip.get('short'), 'line': trip.get('line'),
+                                 'type': key.split(':')[0], 'color': trip.get('color')}, shape))
+        return pieces, changes
+    run_start = 0
+    for i in range(1, len(stops) + 1):
+        if i < len(stops) and stops[i]['short'] == stops[run_start]['short'] and i < len(stops) - 1:
+            continue
+        a = stops[run_start]
+        end_stop = stops[min(i, len(stops) - 1)]
+        pts = shape[a['shapeIdx']:end_stop['shapeIdx'] + 1]
+        vtype = types.get(a['short'], trip.get('type'))
+        key = _line_key({'type': vtype, 'short': a['short'], 'line': a['line']})
+        if key and len(pts) >= 2:
+            pieces.append((key, {'key': key, 'short': a['short'], 'line': a['line'],
+                                 'type': key.split(':')[0], 'color': a['color']}, pts))
+        if i < len(stops) and stops[i]['short'] != a['short']:
+            b = stops[i]
+            prev = b  # the stop where the vehicle departs under its new number
+            to_key = _line_key({'type': types.get(b['short'], vtype), 'short': b['short'], 'line': b['line']})
+            if key and to_key:
+                changes.append({
+                    'id': f"{a['short']}>{b['short']}@{prev['name']}",
+                    'stop': prev['name'], 'lat': prev['lat'], 'lon': prev['lon'],
+                    'from': a['short'], 'to': b['short'], 'fromColor': a['color'], 'toColor': b['color'],
+                    'fromKey': key, 'toKey': to_key,
+                })
+        run_start = i
+    return pieces, changes
+
+
+@app.route('/api/line-shapes')
+def get_line_shapes():
+    _load_line_shapes()
+    radar = _radar_cache.get('data') or {}
+    jobs, seen = [], set()
+    cutoff = time.time() - LINE_SHAPES_MAX_AGE
+    for v in radar.get('vehicles') or []:
+        key = _line_key(v)
+        if not key or not v.get('id'):
+            continue
+        direction = (v.get('direction') or '').strip() or '?'
+        entry = _line_shapes['lines'].get(key)
+        have = entry['shapes'].get(direction) if entry else None
+        if have and have.get('ts', 0) > cutoff:
+            continue
+        if entry and len([d for d in entry['shapes'] if '|' not in d]) >= 4:
+            continue
+        if (key, direction) in seen:
+            continue
+        seen.add((key, direction))
+        jobs.append((key, direction, v['id'], {
+            'key': key, 'short': v.get('short'), 'line': v.get('line'),
+            'type': 'tram' if key.startswith('tram:') else 'bus', 'color': v.get('color'),
+        }))
+    if jobs and not _line_shapes_worker['running']:
+        _line_shapes_worker['running'] = True
+        threading.Thread(target=_line_shapes_job, args=(jobs[:40],), daemon=True).start()
+
+    with _line_shapes_lock:
+        out = [{
+            'key': e['key'], 'short': e.get('short'), 'line': e.get('line'), 'type': e.get('type'),
+            'color': e.get('color'), 'shapes': [s['pts'] for s in e['shapes'].values()],
+            'changes': [{k: v for k, v in c.items() if k != 'ts'} for c in (e.get('changes') or {}).values()],
+        } for e in _line_shapes['lines'].values()]
+    return jsonify({'lines': out, 'pending': len(jobs), 'building': _line_shapes_worker['running']})
+
+
+# ===================================================================
+#  WEB PUSH  (real push notifications, also when the app is closed)
+#  - VAPID (RFC 8292) + aes128gcm payload encryption (RFC 8291)
+#  - implemented with `cryptography` only, no extra push library needed
+# ===================================================================
+import base64
+import uuid
+from urllib.parse import urlparse
+
+try:
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    PUSH_AVAILABLE = True
+except Exception as _push_ex:  # pragma: no cover
+    print(f"[WARN] Push deaktiviert (cryptography fehlt): {_push_ex}")
+    PUSH_AVAILABLE = False
+
+PUSH_SUBS_FILE = os.path.join(CACHE_DIR, 'push_subscriptions.json')
+PUSH_STATE_FILE = os.path.join(CACHE_DIR, 'push_state.json')
+VAPID_FILE = os.path.join(CACHE_DIR, 'vapid.json')
+VAPID_SUBJECT = os.environ.get('VAPID_SUBJECT', 'https://mvb-app.onrender.com')
+_push_lock = threading.RLock()
+_push = {'subs': None, 'state': None, 'vapid': None, 'watcher': False, 'last_tick': 0, 'last_disr': 0}
+
+
+def _b64u(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def _b64u_dec(text):
+    text = str(text).strip()
+    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
+
+
+def _vapid():
+    """VAPID key pair: from env (VAPID_PRIVATE_KEY / VAPID_PUBLIC_KEY) or generated once into cache/vapid.json."""
+    if _push['vapid']:
+        return _push['vapid']
+    priv_b64 = os.environ.get('VAPID_PRIVATE_KEY', '').strip()
+    if not priv_b64 and os.path.exists(VAPID_FILE):
+        try:
+            with open(VAPID_FILE, 'r', encoding='utf-8') as f:
+                priv_b64 = json.load(f).get('private', '')
+        except Exception:
+            priv_b64 = ''
+    if priv_b64:
+        priv_int = int.from_bytes(_b64u_dec(priv_b64), 'big')
+        key = ec.derive_private_key(priv_int, ec.SECP256R1())
+    else:
+        key = ec.generate_private_key(ec.SECP256R1())
+        priv_b64 = _b64u(key.private_numbers().private_value.to_bytes(32, 'big'))
+        pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        try:
+            with open(VAPID_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'private': priv_b64, 'public': _b64u(pub)}, f)
+            print("[INFO] Neue VAPID-Schlüssel erzeugt (cache/vapid.json)")
+        except Exception as ex:
+            print(f"[WARN] VAPID-Schlüssel nicht gespeichert: {ex}")
+    pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    _push['vapid'] = {'key': key, 'public': _b64u(pub)}
+    return _push['vapid']
+
+
+def _vapid_auth_header(endpoint):
+    v = _vapid()
+    u = urlparse(endpoint)
+    header = _b64u(json.dumps({'typ': 'JWT', 'alg': 'ES256'}, separators=(',', ':')).encode())
+    claims = _b64u(json.dumps({'aud': f'{u.scheme}://{u.netloc}', 'exp': int(time.time()) + 12 * 3600,
+                               'sub': VAPID_SUBJECT}, separators=(',', ':')).encode())
+    signing_input = f'{header}.{claims}'.encode()
+    r, s = decode_dss_signature(v['key'].sign(signing_input, ec.ECDSA(hashes.SHA256())))
+    jwt = signing_input.decode() + '.' + _b64u(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))
+    return f"vapid t={jwt}, k={v['public']}"
+
+
+def _push_encrypt(payload, p256dh, auth):
+    """RFC 8291 aes128gcm encryption of a push message."""
+    ua_pub = _b64u_dec(p256dh)
+    auth_secret = _b64u_dec(auth)
+    as_key = ec.generate_private_key(ec.SECP256R1())
+    as_pub = as_key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    shared = as_key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_pub))
+    ikm = HKDF(hashes.SHA256(), 32, auth_secret, b'WebPush: info\x00' + ua_pub + as_pub).derive(shared)
+    salt = os.urandom(16)
+    cek = HKDF(hashes.SHA256(), 16, salt, b'Content-Encoding: aes128gcm\x00').derive(ikm)
+    nonce = HKDF(hashes.SHA256(), 12, salt, b'Content-Encoding: nonce\x00').derive(ikm)
+    body = AESGCM(cek).encrypt(nonce, payload + b'\x02', None)
+    return salt + (4096).to_bytes(4, 'big') + bytes([len(as_pub)]) + as_pub + body
+
+
+def _send_push(sub, message, ttl=3600, urgency='high'):
+    """Send one push. Returns True (sent), False (failed) or None (subscription gone)."""
+    if not PUSH_AVAILABLE:
+        return False
+    try:
+        keys = sub.get('keys') or {}
+        data = json.dumps(message, ensure_ascii=False).encode('utf-8')
+        body = _push_encrypt(data, keys['p256dh'], keys['auth'])
+        resp = requests.post(sub['endpoint'], data=body, timeout=10, headers={
+            'Authorization': _vapid_auth_header(sub['endpoint']),
+            'Content-Encoding': 'aes128gcm',
+            'Content-Type': 'application/octet-stream',
+            'TTL': str(ttl),
+            'Urgency': urgency,
+        })
+        if resp.status_code in (404, 410):
+            return None
+        if resp.status_code >= 400:
+            print(f"[WARN] Push {resp.status_code}: {resp.text[:160]}")
+            return False
+        return True
+    except Exception as ex:
+        print(f"[WARN] Push fehlgeschlagen: {ex}")
+        return False
+
+
+def _load_json_file(path, default):
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as ex:
+        print(f"[WARN] {os.path.basename(path)}: {ex}")
+    return default
+
+
+def _save_json_file(path, data):
+    try:
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception as ex:
+        print(f"[WARN] {os.path.basename(path)} nicht gespeichert: {ex}")
+
+
+def _subs():
+    if _push['subs'] is None:
+        with _push_lock:
+            if _push['subs'] is None:
+                _push['subs'] = _load_json_file(PUSH_SUBS_FILE, {})
+    return _push['subs']
+
+
+def _push_state():
+    if _push['state'] is None:
+        with _push_lock:
+            if _push['state'] is None:
+                _push['state'] = _load_json_file(PUSH_STATE_FILE, {'seen': [], 'seeded': False})
+    return _push['state']
+
+
+def _sub_key(endpoint):
+    return hashlib.sha1(str(endpoint).encode()).hexdigest()[:16]
+
+
+def _drop_sub(key):
+    with _push_lock:
+        if _subs().pop(key, None) is not None:
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+
+
+def _in_quiet_hours(prefs):
+    q = prefs.get('quiet')
+    if not q:
+        return False
+    try:
+        start, end = int(q[0]), int(q[1])
+    except Exception:
+        return False
+    h = datetime.datetime.now(local_tz).hour
+    return (start <= h or h < end) if start > end else (start <= h < end)
+
+
+def _disruption_lines(d):
+    nums = set()
+    for l in d.get('lines') or []:
+        m = re.search(r'\d+', str(l))
+        if m:
+            nums.add(m.group(0))
+    text = f"{d.get('title', '')} {d.get('desc', '')}"
+    for m in re.finditer(r'(?:Linie|Linien|Str\.?|Bus|Tram|SEV)\s*((?:\d{1,3}(?:\s*(?:,|und|/|&)\s*)?)+)', text, re.I):
+        nums.update(re.findall(r'\d{1,3}', m.group(1)))
+    return nums
+
+
+def _check_disruptions_for_push():
+    """Detect new Verkehrsmelder entries and notify matching subscribers."""
+    try:
+        with app.test_request_context('/api/disruptions'):
+            resp = get_disruptions()
+        if isinstance(resp, tuple):
+            return 0
+        items = resp.get_json() or []
+    except Exception as ex:
+        print(f"[WARN] Push-Störungscheck: {ex}")
+        return 0
+    if not isinstance(items, list):
+        return 0
+    state = _push_state()
+    seen = set(state.get('seen') or [])
+    current = [d for d in items if d.get('id')]
+    new = [d for d in current if d['id'] not in seen]
+    state['seen'] = list(seen | {d['id'] for d in current})[-400:]
+    if not state.get('seeded'):
+        # first run: remember what already exists, don't spam
+        state['seeded'] = True
+        _save_json_file(PUSH_STATE_FILE, state)
+        return 0
+    _save_json_file(PUSH_STATE_FILE, state)
+    sent = 0
+    for d in new:
+        lines = _disruption_lines(d)
+        crit = bool(d.get('critical'))
+        title = ('🚨 ' if crit else '⚠️ ') + (d.get('title') or 'Neue Meldung')
+        body = re.sub(r'\s+', ' ', d.get('desc') or '').strip()
+        if len(body) > 170:
+            body = body[:167].rsplit(' ', 1)[0] + '…'
+        msg = {'title': title, 'body': body or 'Details im Verkehrsmelder', 'tag': f"disr-{d['id']}",
+               'url': '/?tab=alerts', 'kind': 'disruption', 'lines': sorted(lines)}
+        for key, sub in list(_subs().items()):
+            prefs = sub.get('prefs') or {}
+            if not prefs.get('disruptions', True):
+                continue
+            if prefs.get('criticalOnly') and not crit:
+                continue
+            want = {str(x) for x in prefs.get('lines') or []}
+            if want and lines and not (want & lines):
+                continue
+            if want and not lines and prefs.get('strictLines'):
+                continue
+            if _in_quiet_hours(prefs) and not crit:
+                continue
+            ok = _send_push(sub, msg)
+            if ok is None:
+                _drop_sub(key)
+            elif ok:
+                sent += 1
+    return sent
+
+
+def _hhmm_to_epoch(hhmm, ref_epoch):
+    """Turn 'HH:MM' into an epoch close to ref_epoch (handles midnight)."""
+    try:
+        h, m = [int(x) for x in hhmm.split(':')[:2]]
+    except Exception:
+        return None
+    ref = datetime.datetime.fromtimestamp(ref_epoch, local_tz)
+    best = None
+    for day in (-1, 0, 1):
+        cand = (ref + datetime.timedelta(days=day)).replace(hour=h, minute=m, second=0, microsecond=0)
+        if best is None or abs((cand - ref).total_seconds()) < abs((best - ref).total_seconds()):
+            best = cand
+    return best.timestamp()
+
+
+def _norm_station(name):
+    return re.sub(r'[^a-z0-9äöüß]', '', re.sub(r'^magdeburg,\s*', '', (name or '').lower()))
+
+
+def _check_reminders():
+    """Send departure reminders ('Abfahrts-Wecker') that are due."""
+    now = time.time()
+    sent = 0
+    done = {}  # sub key -> set(reminder ids) to remove
+    for key, sub in list(_subs().items()):
+        for r in list(sub.get('reminders') or []):
+            planned = r.get('planned', 0) / 1000.0
+            if now > planned + 30 * 60:
+                done.setdefault(key, set()).add(r.get('id'))
+                continue  # long gone
+            if now < planned - (r.get('lead', 5) + 25) * 60:
+                continue  # far in the future, no need to ask HAFAS yet
+            depart = planned + 60 * (r.get('delay') or 0)
+            cancelled = False
+            try:
+                trip = _fetch_trip(r['jid'])
+                target = _norm_station(r.get('station'))
+                for st in trip.get('stops') or []:
+                    n = _norm_station(st.get('name'))
+                    if n == target or (target and (target in n or n in target)):
+                        ep = _hhmm_to_epoch(st.get('rt') or st.get('time'), planned)
+                        if ep:
+                            depart = ep
+                        cancelled = bool(st.get('cancelled'))
+                        break
+            except Exception:
+                pass
+            mins = int(round((depart - now) / 60))
+            delay = int(round((depart - planned) / 60))
+            if not (cancelled or mins <= r.get('lead', 5)):
+                continue
+            line = r.get('line') or 'Deine Linie'
+            where = f"Richtung {r.get('direction', '')} ab {r.get('station', '')}"
+            if cancelled:
+                title, body = f"❌ {line} fällt aus", f"Die Fahrt {where} fällt aus."
+            else:
+                title = f"🚋 {line} fährt jetzt!" if mins <= 0 else f"⏰ {line} fährt in {mins} Min."
+                body = where + (f" · +{delay} Min. Verspätung" if delay > 0 else
+                                f" · {abs(delay)} Min. zu früh!" if delay < 0 else " · pünktlich")
+            ok = _send_push(sub, {'title': title, 'body': body, 'tag': f"rem-{r.get('id')}", 'url': '/?tab=departures',
+                                  'kind': 'reminder', 'requireInteraction': True}, ttl=600)
+            if ok is None:
+                _drop_sub(key)
+                break
+            done.setdefault(key, set()).add(r.get('id'))
+            sent += 1 if ok else 0
+    if done:
+        with _push_lock:
+            for key, ids in done.items():
+                sub = _subs().get(key)
+                if sub:
+                    sub['reminders'] = [r for r in sub.get('reminders') or [] if r.get('id') not in ids]
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+    return sent
+
+
+def _push_tick(force=False):
+    now = time.time()
+    if not force and now - _push['last_tick'] < 25:
+        return {}
+    _push['last_tick'] = now
+    out = {'reminders': 0, 'disruptions': 0}
+    if not _subs():
+        return out
+    try:
+        out['reminders'] = _check_reminders()
+    except Exception as ex:
+        print(f"[WARN] Erinnerungen: {ex}")
+    if force or now - _push['last_disr'] > 150:
+        _push['last_disr'] = now
+        try:
+            out['disruptions'] = _check_disruptions_for_push()
+        except Exception as ex:
+            print(f"[WARN] Störungs-Push: {ex}")
+    return out
+
+
+def _push_watcher():
+    while True:
+        try:
+            _push_tick()
+        except Exception as ex:
+            print(f"[WARN] Push-Watcher: {ex}")
+        time.sleep(30)
+
+
+def _ensure_push_watcher():
+    if PUSH_AVAILABLE and not _push['watcher']:
+        with _push_lock:
+            if not _push['watcher']:
+                _push['watcher'] = True
+                threading.Thread(target=_push_watcher, daemon=True, name='push-watcher').start()
+
+
+@app.before_request
+def _start_background_workers():
+    _ensure_push_watcher()
+
+
+def _clean_prefs(p):
+    p = p or {}
+    lines = []
+    for l in p.get('lines') or []:
+        m = re.search(r'\d{1,3}', str(l))
+        if m and m.group(0) not in lines:
+            lines.append(m.group(0))
+    quiet = p.get('quiet')
+    if quiet and isinstance(quiet, (list, tuple)) and len(quiet) == 2:
+        quiet = [int(quiet[0]) % 24, int(quiet[1]) % 24]
+    else:
+        quiet = None
+    return {'disruptions': bool(p.get('disruptions', True)), 'criticalOnly': bool(p.get('criticalOnly', False)),
+            'lines': lines[:30], 'quiet': quiet}
+
+
+@app.route('/api/push/key')
+def push_key():
+    if not PUSH_AVAILABLE:
+        return jsonify({'enabled': False}), 503
+    return jsonify({'enabled': True, 'publicKey': _vapid()['public']})
+
+
+@app.route('/api/push/subscribe', methods=['POST'])
+def push_subscribe():
+    if not PUSH_AVAILABLE:
+        return jsonify({'error': 'Push nicht verfügbar'}), 503
+    data = request.get_json(silent=True) or {}
+    sub = data.get('subscription') or {}
+    if not sub.get('endpoint') or not (sub.get('keys') or {}).get('p256dh'):
+        return jsonify({'error': 'Ungültiges Abo'}), 400
+    key = _sub_key(sub['endpoint'])
+    with _push_lock:
+        entry = _subs().get(key) or {'created': int(time.time()), 'reminders': []}
+        entry.update({'endpoint': sub['endpoint'], 'keys': sub['keys'], 'prefs': _clean_prefs(data.get('prefs')),
+                      'seen': int(time.time()), 'ua': (request.headers.get('User-Agent') or '')[:120]})
+        # reminders the device still knows about (e.g. after a server restart)
+        if data.get('reminders') and not entry.get('reminders'):
+            entry['reminders'] = [r for r in data['reminders'] if isinstance(r, dict) and r.get('jid')][:20]
+        _subs()[key] = entry
+        _save_json_file(PUSH_SUBS_FILE, _subs())
+    return jsonify({'ok': True, 'reminders': entry.get('reminders', [])})
+
+
+@app.route('/api/push/unsubscribe', methods=['POST'])
+def push_unsubscribe():
+    data = request.get_json(silent=True) or {}
+    if data.get('endpoint'):
+        _drop_sub(_sub_key(data['endpoint']))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/push/test', methods=['POST'])
+def push_test():
+    data = request.get_json(silent=True) or {}
+    sub = _subs().get(_sub_key(data.get('endpoint', '')))
+    if not sub:
+        return jsonify({'error': 'Gerät nicht registriert – bitte Push neu aktivieren'}), 404
+    ok = _send_push(sub, {'title': '🔔 Test erfolgreich!', 'body': 'Push-Benachrichtigungen kommen an – auch wenn die App geschlossen ist. 💥',
+                          'tag': 'test', 'url': '/?tab=alerts', 'kind': 'test'}, ttl=300)
+    if ok is None:
+        _drop_sub(_sub_key(data.get('endpoint', '')))
+        return jsonify({'error': 'Abo abgelaufen – bitte Push neu aktivieren'}), 410
+    return jsonify({'ok': bool(ok)}), (200 if ok else 502)
+
+
+@app.route('/api/push/remind', methods=['POST'])
+def push_remind():
+    data = request.get_json(silent=True) or {}
+    key = _sub_key(data.get('endpoint', ''))
+    with _push_lock:
+        sub = _subs().get(key)
+        if not sub:
+            return jsonify({'error': 'Gerät nicht registriert'}), 404
+        rems = sub.setdefault('reminders', [])
+        if data.get('cancel'):
+            sub['reminders'] = [r for r in rems if r.get('id') != data['cancel']]
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+            return jsonify({'ok': True, 'reminders': sub['reminders']})
+        if not data.get('jid') or not data.get('planned'):
+            return jsonify({'error': 'Fahrt fehlt'}), 400
+        rem = {
+            'id': data.get('id') or uuid.uuid4().hex[:10],
+            'jid': data['jid'], 'line': str(data.get('line', ''))[:20], 'direction': str(data.get('direction', ''))[:80],
+            'station': str(data.get('station', ''))[:80], 'planned': int(data['planned']),
+            'lead': max(1, min(30, int(data.get('lead', 5)))), 'delay': int(data.get('delay') or 0),
+        }
+        sub['reminders'] = [r for r in rems if r.get('id') != rem['id']][-19:] + [rem]
+        _save_json_file(PUSH_SUBS_FILE, _subs())
+    _ensure_push_watcher()
+    return jsonify({'ok': True, 'reminder': rem, 'reminders': sub['reminders']})
+
+
+@app.route('/api/push/tick')
+def push_tick_route():
+    """Can be pinged by an external cron job (keeps a free Render instance awake)."""
+    _ensure_push_watcher()
+    res = _push_tick(force=request.args.get('force') == '1')
+    return jsonify({'ok': True, 'subscribers': len(_subs()), **(res or {})})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print("=" * 60)

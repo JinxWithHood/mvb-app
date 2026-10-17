@@ -47,6 +47,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    homeCards.forEach(card => {
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                card.click();
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-go]').forEach(el => {
+        el.addEventListener('click', () => {
+            switchTab(el.getAttribute('data-go'));
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    });
+
     const headerLogo = document.querySelector('.header-logo');
     if (headerLogo) {
         headerLogo.addEventListener('click', () => {
@@ -292,35 +308,54 @@ document.addEventListener('DOMContentLoaded', () => {
     let jinxCanvas = null;
     let jinxAnimId = null;
 
+    let jinxResizeBound = false;
+    const jinxSpriteCache = {};
+    function jinxGlowSprite(color) {
+        if (jinxSpriteCache[color]) return jinxSpriteCache[color];
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        const g = c.getContext('2d');
+        const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+        grd.addColorStop(0, '#ffffff');
+        grd.addColorStop(0.2, color);
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, 32, 32);
+        return (jinxSpriteCache[color] = c);
+    }
+
     function initJinxParticleCanvas() {
         if (!jinxCanvas) {
             jinxCanvas = document.createElement('canvas');
             jinxCanvas.className = 'jinx-sparks-canvas';
             document.body.appendChild(jinxCanvas);
         }
-        
+
         jinxCanvas.style.display = 'block';
         const ctx = jinxCanvas.getContext('2d');
         let width = jinxCanvas.width = window.innerWidth;
         let height = jinxCanvas.height = window.innerHeight;
 
-        const onResize = () => {
-            if (jinxCanvas) {
-                width = jinxCanvas.width = window.innerWidth;
-                height = jinxCanvas.height = window.innerHeight;
-            }
-        };
-        window.removeEventListener('resize', onResize);
-        window.addEventListener('resize', onResize);
+        if (!jinxResizeBound) {
+            jinxResizeBound = true;
+            window.addEventListener('resize', () => {
+                if (jinxCanvas) {
+                    jinxCanvas.width = window.innerWidth;
+                    jinxCanvas.height = window.innerHeight;
+                }
+            });
+        }
 
         const particles = [];
         const colors = ['#FF007F', '#FF0055', '#00F0FF', '#E0AAFF', '#FF3399', '#9900FF'];
-        for (let i = 0; i < 50; i++) {
+        const count = window.innerWidth < 700 ? 28 : 45;
+        for (let i = 0; i < count; i++) {
+            const color = colors[Math.floor(Math.random() * colors.length)];
             particles.push({
                 x: Math.random() * width,
                 y: Math.random() * height,
                 radius: Math.random() * 2.8 + 1,
-                color: colors[Math.floor(Math.random() * colors.length)],
+                sprite: jinxGlowSprite(color),
                 speedY: -(Math.random() * 1.6 + 0.6),
                 speedX: (Math.random() - 0.5) * 0.9,
                 alpha: Math.random() * 0.8 + 0.2
@@ -330,28 +365,26 @@ document.addEventListener('DOMContentLoaded', () => {
         function drawParticles() {
             if (currentTheme !== 'jinx') {
                 if (jinxCanvas) jinxCanvas.style.display = 'none';
+                jinxAnimId = null;
                 return;
             }
+            width = jinxCanvas.width;
+            height = jinxCanvas.height;
             ctx.clearRect(0, 0, width, height);
-            
-            particles.forEach(p => {
-                p.y += p.speedY;
-                p.x += p.speedX;
-                if (p.y < -10) {
-                    p.y = height + 10;
-                    p.x = Math.random() * width;
+            if (!document.hidden) {
+                for (const p of particles) {
+                    p.y += p.speedY;
+                    p.x += p.speedX;
+                    if (p.y < -10) {
+                        p.y = height + 10;
+                        p.x = Math.random() * width;
+                    }
+                    const s = p.radius * 5;
+                    ctx.globalAlpha = p.alpha;
+                    ctx.drawImage(p.sprite, p.x - s / 2, p.y - s / 2, s, s);
                 }
-                ctx.save();
-                ctx.globalAlpha = p.alpha;
-                ctx.shadowBlur = 12;
-                ctx.shadowColor = p.color;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            });
-
+                ctx.globalAlpha = 1;
+            }
             jinxAnimId = requestAnimationFrame(drawParticles);
         }
 
@@ -359,24 +392,32 @@ document.addEventListener('DOMContentLoaded', () => {
         drawParticles();
     }
 
+    const THEME_META_COLORS = { light: '#018e4a', dark: '#041c10', jinx: '#10081e' };
+    const themeIconSvg = (id) => `<svg class="ico" aria-hidden="true"><use href="#${id}"/></svg>`;
+
     function applyTheme(theme) {
+        if (!['light', 'dark', 'jinx'].includes(theme)) theme = 'light';
         currentTheme = theme;
         appContainer.classList.remove('theme-light', 'theme-dark', 'theme-jinx');
-        
+        appContainer.classList.add(`theme-${theme}`);
+        document.body.setAttribute('data-theme', theme);
+
         if (theme === 'light') {
-            appContainer.classList.add('theme-light');
-            if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
+            if (themeToggleBtn) themeToggleBtn.innerHTML = themeIconSvg('i-moon');
             if (jinxCanvas) jinxCanvas.style.display = 'none';
         } else if (theme === 'dark') {
-            appContainer.classList.add('theme-dark');
-            if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
+            if (themeToggleBtn) themeToggleBtn.innerHTML = themeIconSvg('i-sun');
             if (jinxCanvas) jinxCanvas.style.display = 'none';
         } else if (theme === 'jinx') {
-            appContainer.classList.add('theme-jinx');
             if (themeToggleBtn) themeToggleBtn.textContent = '💣';
             initJinxParticleCanvas();
         }
-        localStorage.setItem('theme', theme);
+
+        if (window.LiveMap) window.LiveMap.setTheme(theme);
+
+        const metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) metaTheme.setAttribute('content', THEME_META_COLORS[theme]);
+        try { localStorage.setItem('theme', theme); } catch (e) {}
     }
 
     function triggerJinxExplosion() {
@@ -385,6 +426,18 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('jinx_unlocked', 'true');
         }
 
+        // New escalating glitch → countdown → BOOM sequence (jinx-fx.js)
+        if (window.JinxFX && typeof window.JinxFX.play === 'function') {
+            if (window.JinxFX.isRunning && window.JinxFX.isRunning()) return;
+            window.JinxFX.play({
+                app: appContainer,
+                onBoom: () => applyTheme('jinx'),
+                onDone: () => showToast('💣💥 BOOM! Jinx Secret aktiviert! 💥💣', 'success')
+            });
+            return;
+        }
+
+        // Fallback: classic one-shot explosion
         // 1. Screenshake on entire app container
         appContainer.classList.remove('jinx-screenshake');
         void appContainer.offsetWidth; // trigger reflow
@@ -547,14 +600,18 @@ document.addEventListener('DOMContentLoaded', () => {
         text = text.replace(/\b(Linien?|Bussen?|Bus|Nachtlinien?|Nachtlinie|Str\.)\s+([0-9NKVG,\sund/–-]+)\b/g, (match, prefix, nums) => {
             const tokens = nums.split(/(\d+|N\d+|KVG\d+|und|,|\s+)/);
             const res = [];
+            let pillCount = 0;
             for (const tok of tokens) {
                 const t = tok.trim();
                 if (MVB_OFFICIAL_LINE_COLORS[t]) {
                     res.push(makeTransitPillHtml(t));
+                    pillCount++;
                 } else if (t) {
                     res.push(tok);
                 }
             }
+            // No real line number found (e.g. "Bus und Bahn") -> keep the original text
+            if (pillCount === 0) return match;
             return res.join('');
         });
 
@@ -617,6 +674,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.innerWidth >= 1024;
     }
 
+    window.MVBToast = (m, t) => showToast(m, t);
     function showToast(message, type = 'info') {
         const container = document.getElementById('toastContainer');
         const toast = document.createElement('div');
@@ -678,34 +736,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (opLower.includes('mvb') || opLower.includes('magdeburg')) {
-            logoSrc = 'logo_mvb.png';
+            logoSrc = 'assets/logos/logo_mvb.png';
             altText = 'MVB';
         } else if (opLower === 'db' || opLower.includes('deutsche bahn') || opLower.includes('db regio') || opLower.includes('db fernverkehr') || opLower.includes('dostgo') || opLower.includes('s-bahn mitte') || opLower.includes('db start')) {
-            logoSrc = 'logo_db.png';
+            logoSrc = 'assets/logos/logo_db.png';
             altText = 'Deutsche Bahn';
         } else if (opLower.includes('odeg') || opLower.includes('ostdeutsch')) {
-            logoSrc = 'logo_odeg.png';
+            logoSrc = 'assets/logos/logo_odeg.png';
             altText = 'ODEG';
         } else if (opLower.includes('pvgs')) {
-            logoSrc = 'logo_pvgs.png';
+            logoSrc = 'assets/logos/logo_pvgs.png';
             altText = 'PVGS';
         } else if (opLower.includes('börde') || opLower.includes('boerde')) {
-            logoSrc = 'logo_boerdebus.png';
+            logoSrc = 'assets/logos/logo_boerdebus.png';
             altText = 'BördeBus';
         } else if (opLower.includes('njl') || opLower.includes('jerichow')) {
-            logoSrc = 'logo_njl.png';
+            logoSrc = 'assets/logos/logo_njl.png';
             altText = 'NJL';
         } else if (opLower.includes('kvg') || opLower.includes('salzland')) {
-            logoSrc = 'logo_kvg.png';
+            logoSrc = 'assets/logos/logo_kvg.png';
             altText = 'KVG';
         } else if (opLower.includes('flix')) {
-            logoSrc = 'logo_flixbus.png';
+            logoSrc = 'assets/logos/logo_flixbus.png';
             altText = 'FlixBus';
         } else if (opLower.includes('havag') || opLower.includes('halle')) {
-            logoSrc = 'logo_havag.png';
+            logoSrc = 'assets/logos/logo_havag.png';
             altText = 'HAVAG';
         } else if (opLower.includes('metronom')) {
-            logoSrc = 'logo_metronom.png';
+            logoSrc = 'assets/logos/logo_metronom.png';
             altText = 'metronom';
         }
 
@@ -790,7 +848,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const plannedEl = card.querySelector('.departure-time-planned');
-        if (plannedEl) {
+        const existingEst = card.querySelector('.departure-time-estimated');
+        if (delay === 0 && existingEst) existingEst.remove();
+        if (plannedEl && delay !== 0) {
             const timeStr = plannedEl.textContent;
             const estimatedStr = computeEstimatedTimeStr(timeStr, delay);
             if (estimatedStr) {
@@ -815,6 +875,47 @@ document.addEventListener('DOMContentLoaded', () => {
         if (headerTime) headerTime.textContent = timeStrShort;
         if (widgetClockTime) widgetClockTime.textContent = timeStrLong;
         if (widgetClockDate) widgetClockDate.textContent = dateStr;
+        const heroClock = document.getElementById('heroClock');
+        if (heroClock) heroClock.textContent = `${timeStrShort} Uhr · ${now.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+    }
+
+    function getGreeting() {
+        const h = new Date().getHours();
+        if (h < 5) return 'Gute Nacht';
+        if (h < 11) return 'Guten Morgen';
+        if (h < 17) return 'Guten Tag';
+        if (h < 22) return 'Guten Abend';
+        return 'Gute Nacht';
+    }
+
+    const HERO_TEXTS = {
+        home: () => ({
+            eyebrow: `${getGreeting()} 👋`,
+            title: 'Wohin geht\'s heute?',
+            sub: 'Live-Abfahrten, Verbindungen und Störungen für Magdeburg — werbefrei und in Echtzeit.'
+        }),
+        departures: () => ({
+            eyebrow: 'Live-Abfahrtstafel',
+            title: 'Abfahrten',
+            sub: 'Echtzeit-Abfahrten mit Verspätungen, Ausfällen und Live-Position der Fahrzeuge.'
+        }),
+        connections: () => ({
+            eyebrow: 'Routenplaner',
+            title: 'Verbindung suchen',
+            sub: 'Von A nach B mit Tram, Bus und Bahn — inklusive Umstiege und Live-Verlauf.'
+        })
+    };
+
+    function updateHeroTexts(view) {
+        const factory = HERO_TEXTS[view];
+        if (!factory) return;
+        const t = factory();
+        const eb = document.getElementById('heroEyebrow');
+        const ti = document.getElementById('heroTitle');
+        const su = document.getElementById('heroSub');
+        if (eb) eb.textContent = t.eyebrow;
+        if (ti) ti.textContent = t.title;
+        if (su) su.textContent = t.sub;
     }
     clockInterval = setInterval(updateClockWidgets, 1000);
     updateClockWidgets();
@@ -834,8 +935,17 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(connectionStopsInterval);
             connectionStopsInterval = null;
         }
+        appContainer.setAttribute('data-view', targetTabId);
+        updateHeroTexts(targetTabId);
+
+        // Live map: only poll while visible
+        if (window.LiveMap) {
+            if (targetTabId === 'map') setTimeout(() => window.LiveMap.show(), 140);
+            else window.LiveMap.hide();
+        }
+
         // Toggle hero section and inner forms depending on mode
-        if (targetTabId === 'departures') {
+        if (targetTabId === 'departures' || targetTabId === 'home') {
             heroSection.style.display = 'block';
             heroSection.hidden = false;
             formDepartures.hidden = false;
@@ -905,14 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => {
             const targetTab = btn.getAttribute('data-target') || btn.getAttribute('data-tab');
             switchTab(targetTab);
-            // Only scroll to results if we aren't showing search card
-            if (targetTab === 'alerts' || targetTab === 'tickets' || targetTab === 'news') {
-                // Instantly scroll up to top since content fills the screen
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            } else {
-                // If searching, stay at top to let user enter text
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     });
 
@@ -942,14 +1045,50 @@ document.addEventListener('DOMContentLoaded', () => {
         {"id": "7528", "name": "Magdeburg, Barleber See (Tram/Bus)"}
     ];
 
-    function setupAutocomplete(inputEl, suggestionsEl, clearBtnEl, onSelect) {
+    function setupAutocomplete(inputEl, suggestionsEl, clearBtnEl, onSelect, onEnter) {
         let debounceTimer;
         let lastQuery = '';
+        let activeIndex = -1;
+
+        const setExpanded = (open) => inputEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+        const highlight = (idx) => {
+            const items = suggestionsEl.querySelectorAll('.suggestion-item');
+            items.forEach((it, i) => it.classList.toggle('active', i === idx));
+            activeIndex = idx;
+            if (items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+        };
+
+        inputEl.addEventListener('keydown', (e) => {
+            const items = suggestionsEl.querySelectorAll('.suggestion-item');
+            const open = !suggestionsEl.hidden && items.length > 0;
+            if (e.key === 'ArrowDown' && open) {
+                e.preventDefault();
+                highlight((activeIndex + 1) % items.length);
+            } else if (e.key === 'ArrowUp' && open) {
+                e.preventDefault();
+                highlight(activeIndex <= 0 ? items.length - 1 : activeIndex - 1);
+            } else if (e.key === 'Escape' && open) {
+                suggestionsEl.hidden = true;
+                setExpanded(false);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (open && activeIndex >= 0 && items[activeIndex]) {
+                    items[activeIndex].click();
+                } else if (typeof onEnter === 'function') {
+                    suggestionsEl.hidden = true;
+                    setExpanded(false);
+                    onEnter();
+                }
+            }
+        });
 
         const renderSuggestions = (list) => {
             suggestionsEl.innerHTML = '';
+            activeIndex = -1;
             if (!list || !list.length) {
                 suggestionsEl.hidden = true;
+                setExpanded(false);
                 return;
             }
             const seenIds = new Set();
@@ -983,11 +1122,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 li.addEventListener('click', () => {
                     inputEl.value = station.name;
                     suggestionsEl.hidden = true;
+                    setExpanded(false);
+                    if (clearBtnEl) clearBtnEl.hidden = false;
                     onSelect(station);
                 });
                 suggestionsEl.appendChild(li);
             });
             suggestionsEl.hidden = false;
+            setExpanded(true);
         };
 
         inputEl.addEventListener('input', () => {
@@ -1055,15 +1197,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupAutocomplete(stationInput, stationSuggestions, clearStationBtn, (station) => {
         currentStation = station;
-    });
+        submitDepBtn.click();
+    }, () => submitDepBtn.click());
 
     setupAutocomplete(originInput, originSuggestions, null, (station) => {
         originStation = station;
-    });
+        if (!destInput.value.trim()) destInput.focus();
+    }, () => destInput.focus());
 
     setupAutocomplete(destInput, destSuggestions, null, (station) => {
         destStation = station;
-    });
+    }, () => submitConnBtn.click());
+
+    // Typing a new name invalidates the previously picked station object
+    originInput.addEventListener('input', () => { if (originStation && originInput.value.trim() !== originStation.name) originStation = null; });
+    destInput.addEventListener('input', () => { if (destStation && destInput.value.trim() !== destStation.name) destStation = null; });
+
+    if (clearStationBtn && stationInput.value.trim()) clearStationBtn.hidden = false;
 
     transportBtns.forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -1229,8 +1379,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // Fetch and Render Departures
     // -----------------------------------------------------------------------
+    function updateBoardHeader() {
+        const nameEl = document.getElementById('boardStationName');
+        const metaEl = document.getElementById('boardMeta');
+        if (nameEl) nameEl.textContent = shortStationName(currentStation.name);
+        if (metaEl) {
+            const now = new Date();
+            const t = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const count = departuresCache.length;
+            const mode = isNowModeActive ? 'Live' : `ab ${depTime.value || '--:--'} Uhr`;
+            metaEl.textContent = `${count} ${count === 1 ? 'Abfahrt' : 'Abfahrten'} · ${mode} · aktualisiert ${t}`;
+        }
+    }
+
     async function fetchDepartures(silent = false) {
-        if (!currentStation.id) return;
+        if (!currentStation || !currentStation.id) return;
+        const nameEl = document.getElementById('boardStationName');
+        if (nameEl) nameEl.textContent = shortStationName(currentStation.name);
         
         if (!silent) {
             departuresLoading.hidden = false;
@@ -1247,9 +1412,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(url);
             const data = await res.json();
             
-            departuresCache = data;
+            departuresCache = Array.isArray(data) ? data : [];
             departuresLoading.hidden = true;
-            renderDepartures(data, silent);
+            renderDepartures(departuresCache, silent);
+            updateBoardHeader();
             
             if (isInitialLoad) {
                 isInitialLoad = false;
@@ -1312,7 +1478,9 @@ document.addEventListener('DOMContentLoaded', () => {
         filtered.forEach((dep, idx) => {
             const card = document.createElement('div');
             card.className = 'departure-card';
-            if (dep.cancelled) card.classList.add('cancelled');
+            const isDiverted = dep.isDiverted || (dep.diversion && dep.diversion.isDiverted);
+            if (dep.cancelled && !isDiverted) card.classList.add('cancelled');
+            if (isDiverted) card.classList.add('diverted');
             card.style.setProperty('--i', idx);
             card.setAttribute('role', 'button');
             card.setAttribute('tabindex', '0');
@@ -1321,25 +1489,37 @@ document.addEventListener('DOMContentLoaded', () => {
             dep.card_journey_id = cardJourneyId;
             card.setAttribute('data-journey-id', cardJourneyId);
             
-            const stateText = dep.cancelled ? 'Ausfall' : (dep.delay > 0 ? `Verspätung +${dep.delay} Minuten` : (dep.delay < 0 ? `Verfrühung ${dep.delay} Minuten` : 'pünktlich'));
+            let stateText = '';
+            if (dep.cancelled && !isDiverted) {
+                stateText = 'Ausfall';
+            } else if (isDiverted) {
+                stateText = 'Umleitung ' + (dep.delay > 0 ? `+${dep.delay} Min` : 'pünktlich');
+            } else {
+                stateText = (dep.delay > 0 ? `Verspätung +${dep.delay} Minuten` : (dep.delay < 0 ? `Verfrühung ${dep.delay} Minuten` : 'pünktlich'));
+            }
             card.setAttribute('aria-label', `${dep.line} nach ${dep.direction}, geplant ${dep.time}, ${stateText}`);
 
             const luminance = getLuminance(dep.lineColor);
             const textClass = luminance > 180 ? 'dark-text' : '';
 
             let delayBadgeHtml = '';
-            if (dep.cancelled) {
+            if (dep.cancelled && !isDiverted) {
                 delayBadgeHtml = `<span class="delay-badge cancelled">Ausfall</span>`;
-            } else if (dep.delay === null || dep.delay === undefined) {
-                delayBadgeHtml = `<span class="delay-badge no-realtime">keine Echtzeit</span>`;
-            } else if (dep.delay < 0) {
-                delayBadgeHtml = `<span class="delay-badge early">${dep.delay} Min</span>`;
-            } else if (dep.delay <= 1) {
-                delayBadgeHtml = `<span class="delay-badge on-time">pünktlich</span>`;
-            } else if (dep.delay < 5) {
-                delayBadgeHtml = `<span class="delay-badge light-delay">+${dep.delay} Min</span>`;
             } else {
-                delayBadgeHtml = `<span class="delay-badge heavy-delay">+${dep.delay} Min</span>`;
+                if (dep.delay === null || dep.delay === undefined) {
+                    delayBadgeHtml = `<span class="delay-badge no-realtime">keine Echtzeit</span>`;
+                } else if (dep.delay < 0) {
+                    delayBadgeHtml = `<span class="delay-badge early">${dep.delay} Min</span>`;
+                } else if (dep.delay <= 1) {
+                    delayBadgeHtml = `<span class="delay-badge on-time">pünktlich</span>`;
+                } else if (dep.delay < 5) {
+                    delayBadgeHtml = `<span class="delay-badge light-delay">+${dep.delay} Min</span>`;
+                } else {
+                    delayBadgeHtml = `<span class="delay-badge heavy-delay">+${dep.delay} Min</span>`;
+                }
+                if (isDiverted) {
+                    delayBadgeHtml += ` <span class="delay-badge diversion">⚠️ Umleitung</span>`;
+                }
             }
 
             const showEstimated = dep.delay && dep.delay !== 0 && dep.estimatedTime;
@@ -1369,7 +1549,27 @@ document.addEventListener('DOMContentLoaded', () => {
             let sevTagHtml = '';
             if (isSev) {
                 const sevLabel = dep.sevInfo || 'Schienenersatzverkehr';
-                sevTagHtml = `<span class="departure-sev-tag" style="font-size:10px; font-weight:700; color:#FF6F00; background:rgba(255,111,0,0.12); padding:1px 5px; border-radius:3px; border:1px solid rgba(255,111,0,0.3); margin-left:6px;" title="${sevLabel}">🚌 SEV</span>`;
+                sevTagHtml = `<span class="departure-sev-tag" style="font-size:10.5px; font-weight:700; color:#EA580C; background:rgba(234,88,12,0.14); padding:2px 7px; border-radius:4px; border:1px solid rgba(234,88,12,0.4); margin-left:6px; display:inline-flex; align-items:center; gap:4px;" title="${sevLabel}">🚌 SEV Ersatzverkehr</span>`;
+            }
+
+            let directionHtml = '';
+            if (isDiverted && dep.originalDirection && dep.originalDirection.toLowerCase().trim() !== dep.direction.toLowerCase().trim()) {
+                directionHtml = `
+                    <div class="departure-direction-wrap">
+                        <span class="departure-direction original-strikethrough">${dep.originalDirection}</span>
+                        <span class="departure-direction new-destination">${dep.direction}</span>
+                        <span class="diversion-icon" title="Umleitung">⚠️</span>
+                    </div>
+                `;
+            } else if (isDiverted) {
+                directionHtml = `
+                    <div class="departure-direction-wrap">
+                        <span class="departure-direction">${dep.direction}</span>
+                        <span class="diversion-icon" title="Umleitung">⚠️</span>
+                    </div>
+                `;
+            } else {
+                directionHtml = `<span class="departure-direction">${dep.direction}</span>`;
             }
 
             card.innerHTML = `
@@ -1378,7 +1578,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="departure-info">
                     <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; min-width:0;">
-                        <span class="departure-direction">${dep.direction}</span>
+                        ${directionHtml}
                         ${sevTagHtml}
                     </div>
                     ${platformHtml}
@@ -1477,18 +1677,112 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchDepartures();
 
     // Trigger departures search from widget button
-    submitDepBtn.addEventListener('click', () => {
+    async function resolveStationFromText(text) {
+        const lower = text.toLowerCase();
+        const local = LOCAL_POPULAR_STATIONS.find(s => s.name.toLowerCase() === lower) ||
+                      getRecentStations().find(s => s.name.toLowerCase() === lower);
+        if (local) return local;
+        try {
+            const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(text)}`);
+            const data = await res.json();
+            if (Array.isArray(data) && data.length) return data[0];
+        } catch (e) {
+            console.warn('Haltestellen-Auflösung fehlgeschlagen:', e);
+        }
+        const partial = LOCAL_POPULAR_STATIONS.find(s => s.name.toLowerCase().includes(lower));
+        return partial || null;
+    }
+
+    submitDepBtn.addEventListener('click', async () => {
         const text = stationInput.value.trim();
         if (!text) {
             showToast('Bitte gib einen Haltestellennamen ein', 'warning');
+            stationInput.focus();
             return;
         }
         const stationSuggestions = document.getElementById('stationSuggestions');
         if (stationSuggestions) stationSuggestions.hidden = true;
+
+        if (!currentStation || text !== currentStation.name) {
+            const resolved = await resolveStationFromText(text);
+            if (!resolved) {
+                showToast(`Haltestelle „${escapeHtml(text)}“ nicht gefunden`, 'warning');
+                return;
+            }
+            currentStation = resolved;
+            stationInput.value = resolved.name;
+        }
+
+        rememberStation(currentStation);
         switchTab('departures');
         fetchDepartures();
         scrollToResults();
     });
+
+    // -----------------------------------------------------------------------
+    // Quick station chips (recently used, otherwise popular)
+    // -----------------------------------------------------------------------
+    const QUICK_DEFAULT_IDS = ['7393', '7333', '7330', '3846', '2985', '7349'];
+
+    function getRecentStations() {
+        try {
+            const list = JSON.parse(localStorage.getItem('recent_stations') || '[]');
+            return Array.isArray(list) ? list.filter(s => s && s.id && s.name) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function rememberStation(station) {
+        if (!station || !station.id || !station.name) return;
+        const list = getRecentStations().filter(s => String(s.id) !== String(station.id));
+        list.unshift({ id: station.id, name: station.name });
+        try { localStorage.setItem('recent_stations', JSON.stringify(list.slice(0, 6))); } catch (e) {}
+        renderQuickStations();
+    }
+
+    function shortStationName(name) {
+        return (name || '').replace(/^Magdeburg,\s*/, '').replace(/\s*\((Tram|Bus|Tram\/Bus)\)\s*$/i, '');
+    }
+
+    function renderQuickStations() {
+        const wrap = document.getElementById('quickStations');
+        if (!wrap) return;
+        const recent = getRecentStations();
+        const isRecent = recent.length > 0;
+        const popular = QUICK_DEFAULT_IDS.map(id => LOCAL_POPULAR_STATIONS.find(s => s.id === id)).filter(Boolean);
+        const recentIds = new Set(recent.map(s => String(s.id)));
+        const list = [...recent, ...popular.filter(s => !recentIds.has(String(s.id)))].slice(0, 7);
+
+        wrap.innerHTML = `<span class="quick-stations-label"><svg class="ico" aria-hidden="true"><use href="#${isRecent ? 'i-history' : 'i-star'}"/></svg>${isRecent ? 'Zuletzt' : 'Beliebt'}</span>`;
+        list.forEach(st => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'quick-station-chip';
+            if (currentStation && String(currentStation.id) === String(st.id)) btn.classList.add('current');
+            btn.textContent = shortStationName(st.name);
+            btn.title = st.name;
+            btn.addEventListener('click', () => {
+                currentStation = { id: st.id, name: st.name };
+                stationInput.value = st.name;
+                if (clearStationBtn) clearStationBtn.hidden = false;
+                rememberStation(currentStation);
+                switchTab('departures');
+                fetchDepartures();
+                scrollToResults();
+            });
+            wrap.appendChild(btn);
+        });
+    }
+    renderQuickStations();
+
+    const boardRefreshBtn = document.getElementById('boardRefreshBtn');
+    if (boardRefreshBtn) {
+        boardRefreshBtn.addEventListener('click', () => {
+            boardRefreshBtn.classList.add('spinning');
+            fetchDepartures().finally(() => setTimeout(() => boardRefreshBtn.classList.remove('spinning'), 400));
+        });
+    }
 
     // -----------------------------------------------------------------------
     // Adaptive Detail View Dispatcher (Mobile Modal vs Desktop Right Panel)
@@ -1516,6 +1810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const titlePrefix = cleanLineName.toLowerCase().startsWith('linie') ? '' : 'Linie ';
         detailsTitle.textContent = `${titlePrefix}${cleanLineName}`;
         detailsSubtitle.textContent = `Richtung ${dep.direction}`;
+        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('detailsRemind'), dep, currentStation && currentStation.name);
 
         const luminance = getLuminance(dep.lineColor);
         detailsLineBadge.textContent = cleanLineName;
@@ -1536,6 +1831,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         const pfx = finalLine.toLowerCase().startsWith('linie') ? '' : 'Linie ';
                         detailsTitle.textContent = `${pfx}${finalLine}`;
                         detailsLineBadge.textContent = finalLine;
+                    }
+                    if (data.direction) {
+                        const isDiv = data.isDiverted || (data.diversion && data.diversion.isDiverted);
+                        const dirSub = isDiv ? `Richtung ${data.direction} (Umleitung)` : `Richtung ${data.direction}`;
+                        detailsSubtitle.textContent = dirSub;
                     }
                     if (data.lineColor) {
                         detailsLineBadge.style.backgroundColor = data.lineColor;
@@ -1571,6 +1871,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const titlePrefix = cleanLineName.toLowerCase().startsWith('linie') ? '' : 'Linie ';
         journeyModalTitle.textContent = `${titlePrefix}${cleanLineName}`;
         modalDirection.textContent = `Richtung ${dep.direction}`;
+        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('modalRemind'), dep, currentStation && currentStation.name);
 
         const luminance = getLuminance(dep.lineColor);
         modalLineBadge.textContent = cleanLineName;
@@ -1598,6 +1899,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const pfx = finalLine.toLowerCase().startsWith('linie') ? '' : 'Linie ';
                     journeyModalTitle.textContent = `${pfx}${finalLine}`;
                     modalLineBadge.textContent = finalLine;
+                }
+                if (data.direction) {
+                    const isDiv = data.isDiverted || (data.diversion && data.diversion.isDiverted);
+                    const dirSub = isDiv ? `Richtung ${data.direction} (Umleitung)` : `Richtung ${data.direction}`;
+                    modalDirection.textContent = dirSub;
                 }
                 if (data.lineColor) {
                     modalLineBadge.style.backgroundColor = data.lineColor;
@@ -1640,7 +1946,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Cancel any existing animation frame request for this container
         if (routeContainer._animationFrameId) {
-            cancelAnimationFrame(routeContainer._animationFrameId);
+            clearTimeout(routeContainer._animationFrameId);
             routeContainer._animationFrameId = null;
         }
 
@@ -1693,6 +1999,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const isMvbBus = ((type === 'bus' || type === 'sev' || data.isSEV) && !isOtherCityOp && !hasOtherCityStop && (isExplicitMvb || !opStr || ['51', '52', '53', '54', '56', '57', '58', '59', '61', '66', '69', '71', '72', '73', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49'].some(l => lineStr.replace(/\D/g, '') === l)));
         const isSbahn = (type === 'sbahn' || lineStr.startsWith('s1') || lineStr.startsWith('s-bahn') || lineStr.startsWith('s 1')) && !lineStr.startsWith('str') && !lineStr.startsWith('tram');
         const isSev = (type === 'sev' || data.isSEV || lineStr.startsWith('sev'));
+
+        // Draw the line as rails (tram/train) or as a road (bus/SEV)
+        const isRoadVehicle = isMvbBus || isSev || type === 'bus';
+        routeContainer.classList.toggle('track-road', isRoadVehicle);
+        routeContainer.classList.toggle('track-rail', !isRoadVehicle);
 
         if (isMvbTram) {
             marker.className = 'vehicle-floating-marker tram-mvb-marker';
@@ -1795,7 +2106,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetLeft = leftCurrent + (leftNext - leftCurrent) * interpolationFraction;
             }
 
-            marker.style.top = targetTop + 'px';
             marker.style.left = targetLeft + 'px';
 
             const dotFirst = stopDoms[0].querySelector('.stop-dot');
@@ -1807,6 +2117,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const lastY = coordsLast.top + dotLast.offsetHeight / 2;
 
             const totalHeight = Math.max(0, lastY - firstY);
+
+            // Tram & bus: the vehicle's nose sits exactly on the travelled point,
+            // it slides into view at the first stop and fades out at the terminus.
+            const isVehicleSprite = marker.classList.contains('tram-mvb-marker') || marker.classList.contains('bus-mvb-marker');
+            if (isVehicleSprite) {
+                const bodyLen = marker.offsetHeight || 80;
+                const front = Math.min(Math.max(targetTop, firstY + 12), lastY);
+                const bodyTop = front - bodyLen;
+                const clipTop = Math.max(0, (firstY - 8) - bodyTop);
+                marker.style.transform = 'translate(-50%, -100%)';
+                marker.style.top = front + 'px';
+                marker.style.clipPath = `inset(${Math.min(clipTop, bodyLen)}px -40px 0 -40px)`;
+
+                const lastIdx = stopTimes.length - 1;
+                let opacity = 1;
+                if (lastIdx > 0 && nowMs >= stopTimes[lastIdx]) {
+                    opacity = 0;
+                } else if (activeStopIdx === lastIdx - 1 && interpolationFraction > 0.55) {
+                    opacity = Math.max(0.12, 1 - ((interpolationFraction - 0.55) / 0.45) * 0.88);
+                }
+                marker.style.opacity = opacity;
+            } else {
+                marker.style.transform = 'translate(-50%, -50%)';
+                marker.style.clipPath = '';
+                marker.style.opacity = '';
+                marker.style.top = targetTop + 'px';
+            }
 
             const bgLine = routeContainer.querySelector('.journey-route-bg-line');
             if (bgLine) {
@@ -1822,23 +2159,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Dynamically construct a gradient based on the lineColor of each stop
             const gradientParts = [];
+            // Colour per stop = the colour the stop dot uses (respects line changes "Linienwechsel")
+            const stopColors = [];
+            const stopPcts = [];
             data.stops.forEach((stop, idx) => {
                 const dot = stopDoms[idx].querySelector('.stop-dot');
                 const coords = getRelativeOffset(dot, routeContainer);
                 const y = coords.top + dot.offsetHeight / 2;
-                const pct = totalHeight > 0 ? ((y - firstY) / totalHeight) * 100 : 0;
-                const color = stop.lineColor || data.lineColor || 'var(--primary)';
-                
-                if (idx === 0) {
-                    gradientParts.push(`${color} 0%`);
-                }
+                stopPcts.push(totalHeight > 0 ? ((y - firstY) / totalHeight) * 100 : 0);
+                const domColor = (stopDoms[idx].style.getPropertyValue('--timeline-color') || '').trim();
+                stopColors.push(domColor || stop.lineColor || data.lineColor || 'var(--primary)');
+            });
+            stopColors.forEach((color, idx) => {
+                const pct = stopPcts[idx];
+                if (idx === 0) gradientParts.push(`${color} 0%`);
                 gradientParts.push(`${color} ${pct}%`);
-                if (idx < data.stops.length - 1) {
-                    const nextStop = data.stops[idx + 1];
-                    const nextColor = nextStop.lineColor || data.lineColor || 'var(--primary)';
-                    if (nextColor !== color) {
-                        gradientParts.push(`${nextColor} ${pct}%`);
-                    }
+                const nextColor = stopColors[idx + 1];
+                if (nextColor && nextColor !== color) {
+                    // Smooth colour blend between the two stops instead of a hard cut
+                    const seg = stopPcts[idx + 1] - pct;
+                    gradientParts.push(`${color} ${pct + seg * 0.15}%`);
+                    gradientParts.push(`${nextColor} ${pct + seg * 0.85}%`);
                 }
             });
             const gradientStr = `linear-gradient(to bottom, ${gradientParts.join(', ')})`;
@@ -1848,15 +2189,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 bgLine.style.backgroundSize = `100% ${totalHeight}px`;
                 bgLine.style.backgroundPosition = 'top left';
             }
+            routeContainer.style.setProperty('--track-top', firstY + 'px');
+            routeContainer.style.setProperty('--track-progress', Math.max(0, targetTop - firstY) + 'px');
+            routeContainer.style.setProperty('--track-glow', stopDoms[activeStopIdx].style.getPropertyValue('--timeline-color') || data.lineColor || 'var(--primary)');
+
             if (progressBar) {
                 progressBar.style.background = gradientStr;
                 progressBar.style.backgroundSize = `100% ${totalHeight}px`;
                 progressBar.style.backgroundPosition = 'top left';
-                const activeColor = data.stops[activeStopIdx]?.lineColor || data.lineColor || 'var(--primary)';
+                const activeColor = stopColors[activeStopIdx] || data.lineColor || 'var(--primary)';
                 progressBar.style.boxShadow = `0 0 6px ${activeColor}`;
             }
 
-            routeContainer._animationFrameId = requestAnimationFrame(updatePosition);
+            // The vehicle moves slowly, so ~4 updates per second are plenty (CSS transitions smooth the motion)
+            routeContainer._animationFrameId = setTimeout(() => requestAnimationFrame(updatePosition), 250);
         }
 
         updatePosition();
@@ -2004,6 +2350,36 @@ document.addEventListener('DOMContentLoaded', () => {
             messagesContainer.appendChild(sevDiv);
         }
 
+        if (data.isDiverted || data.diversion) {
+            const divObj = data.diversion || {};
+            const divBanner = document.createElement('div');
+            divBanner.className = 'alert-card glass-card diversion-info-banner';
+            
+            const title = divObj.title || 'Umleitung im Liniennetz';
+            const desc = divObj.text || 'Wegen einer Streckensperrung fährt diese Linie einen geänderten Linienweg.';
+            const cancelledStops = divObj.cancelledStops || data.cancelledStops || [];
+            const replacement = divObj.replacement || '';
+            
+            divBanner.innerHTML = `
+                <div class="diversion-banner-header">
+                    <span class="diversion-banner-icon">⚠️</span>
+                    <span class="diversion-banner-title">${title}</span>
+                </div>
+                <div class="diversion-banner-desc">
+                    ${desc}
+                </div>
+                ${cancelledStops && cancelledStops.length > 0 ? `
+                <div class="diversion-banner-cancelled">
+                    <strong>❌ Entfallende Haltestellen:</strong> ${cancelledStops.join(', ')}
+                </div>` : ''}
+                ${replacement ? `
+                <div class="diversion-banner-replacement">
+                    <strong>🚌 Ersatzverkehr:</strong> ${replacement}
+                </div>` : ''}
+            `;
+            messagesContainer.appendChild(divBanner);
+        }
+
         if (data.messages && data.messages.length > 0) {
             data.messages.forEach(msg => {
                 if (data.sev_info && msg.text && msg.text.includes(data.sev_info)) return;
@@ -2094,6 +2470,15 @@ document.addEventListener('DOMContentLoaded', () => {
             stopEl.style.setProperty('--i', idx);
             stopEl.style.setProperty('--timeline-color', currentLineColor);
 
+            const nextStop = stops[idx + 1];
+            const connectsToDiversion = nextStop && (stop.isDiversion || nextStop.isDiversion);
+            if (stop.isDiversion) {
+                stopEl.classList.add('diversion-stop');
+            }
+            if (connectsToDiversion) {
+                stopEl.classList.add('diversion-connector');
+            }
+
             const timeArea = document.createElement('div');
             timeArea.className = 'stop-time-area';
             
@@ -2153,6 +2538,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const dot = document.createElement('div');
             dot.className = 'stop-dot';
             dot.style.setProperty('--timeline-color', currentLineColor);
+            if (stop.isDiversion) {
+                dot.classList.add('diversion');
+            }
             if (stop.cancelled) {
                 dot.classList.add('cancelled');
             } else if (stop.isVehicleHere) {
@@ -2178,6 +2566,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (stop.cancelled) nameEl.classList.add('cancelled');
             else if (stop.passed) nameEl.classList.add('passed');
             infoEl.appendChild(nameEl);
+
+            if (stop.isDiversion) {
+                const divTag = document.createElement('div');
+                divTag.className = 'stop-diversion-tag';
+                divTag.innerHTML = '<span>⚠️ Umleitungsstrecke</span>';
+                infoEl.appendChild(divTag);
+            }
 
             if (stop.transitionLine) {
                 const badgeEl = document.createElement('div');
@@ -2236,13 +2631,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     closeModalBtn.addEventListener('click', closeJourneyModal);
+    journeyModal.addEventListener('click', (e) => {
+        if (e.target === journeyModal) closeJourneyModal();
+    });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !journeyModal.hidden) closeJourneyModal();
+    });
 
     window.addEventListener('resize', () => {
         if (!isDesktopLayout() && detailsContent.style.display === 'flex' && activeJourneyData) {
             detailsContent.style.display = 'none';
             detailsPlaceholder.style.display = 'flex';
             openJourneyMobileModal(activeJourneyData);
-        } else if (isDesktopLayout() && !journeyModal.hidden && activeJourneyData) {
+        } else if (isDesktopLayout() && !journeyModal.hidden && activeJourneyData && appContainer.getAttribute('data-view') !== 'map') {
             closeJourneyModal();
             openJourneyDesktopPanel(activeJourneyData);
         }
@@ -2295,7 +2696,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function renderConnections(conns) {
-        if (!conns.length) {
+        connectionsList.innerHTML = '';
+        if (!Array.isArray(conns) || !conns.length) {
+            const et = connectionsEmpty.querySelector('.empty-title');
+            const es = connectionsEmpty.querySelector('.empty-subtitle');
+            if (et) et.textContent = 'Keine Verbindung gefunden';
+            if (es) es.textContent = 'Versuch es mit einer anderen Uhrzeit, anderen Haltestellen oder mehr Verkehrsmitteln.';
             connectionsEmpty.hidden = false;
             return;
         }
@@ -2314,23 +2720,28 @@ document.addEventListener('DOMContentLoaded', () => {
             card.setAttribute('tabindex', '0');
             card.setAttribute('aria-expanded', 'false');
 
-            let legsPreviewHtml = '<div class="connection-timeline-bar-container" style="display:flex; height:24px; border-radius:var(--radius-sm); overflow:hidden; margin: 12px 0; background:rgba(0,0,0,0.03);">';
+            const toMins = (t) => {
+                if (!t || !/^\d{1,2}:\d{2}/.test(t)) return null;
+                const [h, m] = t.split(':').map(Number);
+                return h * 60 + m;
+            };
+            let legsPreviewHtml = '<div class="connection-timeline-bar-container" aria-hidden="true">';
             conn.legs.forEach(leg => {
-                const styleColor = leg.type === 'walk' ? '#777' : (leg.lineColor || '#018e4a');
-                let legLabel = leg.type === 'walk' ? '🚶' : leg.line;
-                if (leg.type === 'sbahn') legLabel = `🟢 ${leg.line}`;
-                else if (leg.type === 'hsb') legLabel = `🚂 ${leg.line}`;
-                else if (leg.type === 'sev' || leg.isSEV) legLabel = `🚌 ${leg.line}`;
-                
-                legsPreviewHtml += `
-                    <div style="flex: 1; background-color: ${styleColor}; color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight:700; border-right:1px solid var(--bg-primary); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        <span>${legLabel}</span>
-                    </div>
-                `;
+                const isWalk = leg.type === 'walk';
+                const styleColor = isWalk ? 'transparent' : (leg.lineColor || '#018e4a');
+                let legLabel = isWalk ? '🚶' : escapeHtml(leg.line);
+                if (leg.type === 'sbahn') legLabel = `<span class="sbahn-symbol">S</span>${escapeHtml(leg.line)}`;
+                else if (leg.type === 'hsb') legLabel = `🚂 ${escapeHtml(leg.line)}`;
+                const start = toMins(leg.departure_time);
+                let end = toMins(leg.arrival_time);
+                if (start !== null && end !== null && end < start) end += 1440;
+                const weight = (start !== null && end !== null) ? Math.max(end - start, 2) : 5;
+                const darkText = !isWalk && getLuminance(leg.lineColor) > 180 ? 'dark-text' : '';
+                legsPreviewHtml += `<div class="leg-segment ${isWalk ? 'walk' : ''} ${darkText}" style="flex:${weight} 1 0; background-color:${styleColor};"><span>${legLabel}</span></div>`;
             });
             legsPreviewHtml += '</div>';
 
-            let timelineHtml = `<div class="connection-timeline" style="display: none; margin-top: 16px; border-top:1px solid var(--card-border); padding-top:16px;">`;
+            let timelineHtml = `<div class="connection-timeline" style="display: none;">`;
             conn.legs.forEach((leg, lIdx) => {
                 const textClass = getLuminance(leg.lineColor) > 180 ? 'dark-text' : '';
                 const isTransit = leg.type !== 'walk';
@@ -2421,31 +2832,32 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             timelineHtml += `</div>`;
 
+            const durationLabel = conn.duration >= 60
+                ? `${Math.floor(conn.duration / 60)} Std ${conn.duration % 60} Min`
+                : `${conn.duration} Min`;
+            card.setAttribute('aria-label', `Verbindung ${depTime} bis ${arrTime}, ${durationLabel}, ${conn.transfers === 0 ? 'ohne Umstieg' : conn.transfers + ' Umstiege'}`);
             card.innerHTML = `
                 <div class="connection-header">
-                    <div class="connection-summary">
-                        <span class="connection-duration">⏱️ ${conn.duration} Min</span>
-                        <span class="connection-transfers">${conn.transfers === 0 ? 'Direktfahrt' : `${conn.transfers} Umst.`}</span>
-                    </div>
                     <div class="connection-times">
-                        <div class="connection-time-range">${depTime} - ${arrTime}</div>
+                        <div class="connection-time-range">${depTime}<span class="arrow">→</span>${arrTime}</div>
+                    </div>
+                    <div class="connection-summary">
+                        <span class="connection-duration"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg>${durationLabel}</span>
+                        <span class="connection-transfers">${conn.transfers === 0 ? 'Direkt' : `${conn.transfers} Umstieg${conn.transfers > 1 ? 'e' : ''}`}</span>
                     </div>
                 </div>
                 ${legsPreviewHtml}
-                <div style="font-size:11px; color:var(--text-secondary); text-align:center;">Klicke für Verbindungsdetails</div>
+                <div class="connection-toggle-hint"><span class="hint-text">Details anzeigen</span><span class="chev" aria-hidden="true">▾</span></div>
                 ${timelineHtml}
             `;
 
             const toggleDetails = () => {
                 const timeline = card.querySelector('.connection-timeline');
-                const isExpanded = timeline.style.display === 'block';
-                timeline.style.display = isExpanded ? 'none' : 'block';
-                card.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
-                
-                const promptText = card.querySelector('div:nth-of-type(2)');
-                if (promptText) {
-                    promptText.textContent = isExpanded ? 'Klicke für Verbindungsdetails' : 'Details ausblenden';
-                }
+                const willExpand = timeline.style.display !== 'block';
+                timeline.style.display = willExpand ? 'block' : 'none';
+                card.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
+                const hintText = card.querySelector('.connection-toggle-hint .hint-text');
+                if (hintText) hintText.textContent = willExpand ? 'Details ausblenden' : 'Details anzeigen';
             };
 
             card.addEventListener('click', (e) => {
@@ -2523,131 +2935,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentDisruptionFilter = 'all';
     let currentDisruptionQuery = '';
     let knownDisruptionIds = new Set(JSON.parse(localStorage.getItem('knownDisruptions') || '[]'));
-    let pushEnabled = (localStorage.getItem('mvb_push_enabled') === 'true') && ('Notification' in window && Notification.permission === 'granted');
-    let pushBannerDismissed = localStorage.getItem('mvb_push_banner_dismissed') === 'true';
-    const dismissPushBtn = document.getElementById('dismissPushBtn');
-
-    function updatePushStatusUI() {
-        if (!('Notification' in window)) {
-            if (alertsPushCard) alertsPushCard.style.display = 'none';
-            return;
-        }
-
-        if (pushBannerDismissed || pushEnabled) {
-            if (alertsPushCard) alertsPushCard.classList.add('dismissed');
-        } else {
-            if (alertsPushCard) alertsPushCard.classList.remove('dismissed');
-        }
-
-        const perm = Notification.permission;
-        if (perm === 'granted') {
-            if (pushEnabled) {
-                if (pushStatusIcon) pushStatusIcon.textContent = '🔔';
-                if (pushStatusHeadline) pushStatusHeadline.textContent = 'Push-Benachrichtigungen aktiv';
-                if (pushStatusSubline) pushStatusSubline.textContent = 'Du wirst automatisch bei neuen Störungen und Sperrungen im MVB-Netz benachrichtigt.';
-                if (togglePushBtn) {
-                    togglePushBtn.textContent = '🔕 Deaktivieren';
-                    togglePushBtn.className = 'btn-push-toggle active';
-                }
-                if (testPushBtn) testPushBtn.style.display = 'inline-flex';
-                if (alertsPushCard) alertsPushCard.classList.remove('disabled');
-            } else {
-                if (pushStatusIcon) pushStatusIcon.textContent = '🔕';
-                if (pushStatusHeadline) pushStatusHeadline.textContent = 'Push-Benachrichtigungen pausiert';
-                if (pushStatusSubline) pushStatusSubline.textContent = 'Benachrichtigungen sind vorübergehend stummgeschaltet.';
-                if (togglePushBtn) {
-                    togglePushBtn.textContent = '🔔 Aktivieren';
-                    togglePushBtn.className = 'btn-push-toggle';
-                }
-                if (testPushBtn) testPushBtn.style.display = 'none';
-                if (alertsPushCard) alertsPushCard.classList.add('disabled');
-            }
-        } else if (perm === 'denied') {
-            if (pushStatusIcon) pushStatusIcon.textContent = '🚫';
-            if (pushStatusHeadline) pushStatusHeadline.textContent = 'Benachrichtigungen blockiert';
-            if (pushStatusSubline) pushStatusSubline.textContent = 'Berechtigung im Browser verweigert. Erlaube Benachrichtigungen im Seitenschloss der Adressleiste.';
-            if (togglePushBtn) {
-                togglePushBtn.textContent = '⚙️ Einstellungen';
-                togglePushBtn.className = 'btn-push-toggle active';
-            }
-            if (testPushBtn) testPushBtn.style.display = 'none';
-            if (alertsPushCard) alertsPushCard.classList.add('disabled');
-        } else {
-            // default
-            if (pushStatusIcon) pushStatusIcon.textContent = '🔔';
-            if (pushStatusHeadline) pushStatusHeadline.textContent = 'Push-Benachrichtigungen aktivieren';
-            if (pushStatusSubline) pushStatusSubline.textContent = 'Erhalte sofort eine Info auf dein Gerät bei Streckensperrungen & SEV.';
-            if (togglePushBtn) {
-                togglePushBtn.textContent = '🔔 Aktivieren';
-                togglePushBtn.className = 'btn-push-toggle';
-            }
-            if (testPushBtn) testPushBtn.style.display = 'none';
-            if (alertsPushCard) alertsPushCard.classList.remove('disabled');
-        }
-    }
-
-    if (dismissPushBtn) {
-        dismissPushBtn.addEventListener('click', () => {
-            pushBannerDismissed = true;
-            localStorage.setItem('mvb_push_banner_dismissed', 'true');
-            if (alertsPushCard) alertsPushCard.classList.add('dismissed');
-        });
-    }
-
-    if (togglePushBtn) {
-        togglePushBtn.addEventListener('click', () => {
-            if (!('Notification' in window)) {
-                showToast('Dein Browser unterstützt keine Push-Benachrichtigungen.', 'warning');
-                return;
-            }
-
-            if (Notification.permission === 'granted') {
-                pushEnabled = true;
-                pushBannerDismissed = true;
-                localStorage.setItem('mvb_push_enabled', 'true');
-                localStorage.setItem('mvb_push_banner_dismissed', 'true');
-                updatePushStatusUI();
-                showToast('Push-Benachrichtigungen aktiviert! 🔔', 'success');
-            } else if (Notification.permission === 'denied') {
-                showToast('Benachrichtigungen sind im Browser blockiert. Bitte in den Browsereinstellungen freigeben.', 'warning');
-            } else {
-                Notification.requestPermission().then(permission => {
-                    if (permission === 'granted') {
-                        pushEnabled = true;
-                        pushBannerDismissed = true;
-                        localStorage.setItem('mvb_push_enabled', 'true');
-                        localStorage.setItem('mvb_push_banner_dismissed', 'true');
-                        // Seed all existing disruption IDs so we NEVER trigger false new alert on activation!
-                        rawDisruptionsData.forEach(item => {
-                            if (item.id) knownDisruptionIds.add(item.id);
-                        });
-                        localStorage.setItem('knownDisruptions', JSON.stringify(Array.from(knownDisruptionIds)));
-                        updatePushStatusUI();
-                        showToast('Push-Benachrichtigungen erfolgreich aktiviert! 🎉', 'success');
-                    } else {
-                        updatePushStatusUI();
-                        showToast('Benachrichtigungen wurden nicht aktiviert.', 'warning');
-                    }
-                });
-            }
-        });
-    }
-
-    if (testPushBtn) {
-        testPushBtn.addEventListener('click', () => {
-            if ('Notification' in window && Notification.permission === 'granted') {
-                try {
-                    new Notification('🚨 Test: MVB Verkehrsmelder', {
-                        body: 'Push-Benachrichtigungen funktionieren einwandfrei! Du wirst bei echten Störungen rechtzeitig informiert.',
-                        icon: 'assets/tram_mvb.png'
-                    });
-                } catch (e) {
-                    console.warn('Test push error:', e);
-                }
-            }
-            showToast('Test-Benachrichtigung gesendet! 🔔', 'success');
-        });
-    }
+    // Push notifications are handled by push.js (real Web Push via the backend)
+    const pushEnabled = false;
 
     if (refreshAlertsBtn) {
         refreshAlertsBtn.addEventListener('click', () => {
@@ -2708,7 +2997,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (countCritical) countCritical.textContent = critC;
     }
 
+    function updateHeroNetStatus(alerts) {
+        const dot = document.getElementById('heroNetDot');
+        const txt = document.getElementById('heroNetText');
+        if (!dot || !txt) return;
+        if (!alerts.length) {
+            dot.className = 'status-indicator-dot';
+            txt.textContent = 'Freie Fahrt im MVB-Netz';
+            return;
+        }
+        const hasCritical = alerts.some(a => a.critical);
+        dot.className = hasCritical ? 'status-indicator-dot danger' : 'status-indicator-dot warning';
+        txt.textContent = `${alerts.length} ${alerts.length === 1 ? 'Meldung' : 'Meldungen'} im Netz`;
+    }
+
     function updateHubStatus(alerts) {
+        updateHeroNetStatus(alerts);
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} Uhr`;
         if (alertsStatusSubtitle) alertsStatusSubtitle.textContent = `Stand: Heute, ${timeStr}`;
@@ -2859,7 +3163,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const res = await fetch(`${API_BASE}/disruptions`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
+            if (!Array.isArray(data)) throw new Error('Ungültige Antwort');
             
             alertsLoading.hidden = true;
             rawDisruptionsData = data.filter(a => a.title && a.desc);
@@ -2885,6 +3191,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error('Meldungsfehler:', err);
             alertsLoading.hidden = true;
+            const heroNetText = document.getElementById('heroNetText');
+            if (heroNetText) heroNetText.textContent = 'Netzlage nicht verfügbar';
             if (!silent) {
                 alertsList.innerHTML = '<div class="error-card glass-card">Meldungen konnten nicht geladen werden.</div>';
             }
@@ -2931,29 +3239,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     headerAlertBadge.hidden = rawDisruptionsData.length === 0;
                 }
 
-                // Fire notification ONLY if push is actively enabled
-                if (pushEnabled && ('Notification' in window) && Notification.permission === 'granted') {
-                    const newestAlert = rawDisruptionsData.find(a => brandNewIds.includes(a.id));
-                    const notificationTitle = newestAlert ? newestAlert.title : 'Neue Störungsmeldung';
-                    const notificationBody = newestAlert ? newestAlert.desc.substring(0, 120) + '...' : 'Details im Verkehrsmelder';
-                    
-                    try {
-                        new Notification('🚨 MVB Störungsmeldung', {
-                            body: `${notificationTitle}\n${notificationBody}`,
-                            icon: 'assets/tram_mvb.png'
-                        });
-                    } catch (e) {
-                        console.warn('Push error:', e);
-                    }
-                    showToast(`🚨 Neue Störung: ${notificationTitle}`, 'critical');
-                }
+                // In-page hint (the real push notification comes from the server via push.js)
+                const newestAlert = rawDisruptionsData.find(a => brandNewIds.includes(a.id));
+                showToast(`🚨 Neue Störung: ${newestAlert ? newestAlert.title : 'Neue Meldung'}`, 'critical');
             }
         } catch (err) {
             console.warn('Hintergrundcheck Fehler:', err);
         }
     }
 
-    updatePushStatusUI();
+    if (window.MVBPush) window.MVBPush.init({ apiBase: API_BASE, toast: showToast });
     fetchDisruptions();
     alertsInterval = setInterval(checkNewDisruptionsBackground, 45000);
 
@@ -3295,8 +3590,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 2000);
     }
 
-    // Set the initial view to the Home Dashboard on load
-    switchTab('home');
+    // Live-Netzkarte
+    if (window.LiveMap) {
+        window.LiveMap.init({
+            apiBase: API_BASE,
+            onOpenJourney: (dep) => {
+                activeJourneyData = dep;
+                openJourneyMobileModal(dep);
+            }
+        });
+        window.LiveMap.setTheme(currentTheme);
+    }
+
+    // Initial view: Home, or the tab requested via ?tab= (push notifications, app shortcuts)
+    const VALID_TABS = ['home', 'departures', 'connections', 'map', 'alerts', 'tickets', 'news'];
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    switchTab(VALID_TABS.includes(requestedTab) ? requestedTab : 'home');
+    if (requestedTab && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    // A tapped notification while the app is already open
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', (e) => {
+            const tab = e.data && e.data.type === 'open-tab' ? e.data.tab : null;
+            if (tab && VALID_TABS.includes(tab)) {
+                switchTab(tab);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                if (tab === 'alerts' && typeof fetchDisruptions === 'function') fetchDisruptions(true);
+            }
+        });
+    }
 
     // Dismiss fullscreen loading screen smoothly once initialization is complete
     setTimeout(() => {

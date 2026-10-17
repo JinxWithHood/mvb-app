@@ -1,0 +1,29 @@
+{
+  "id": "/",
+  "name": "Magdeburg Mobil — Fahrplan & Live-Abfahrten",
+  "short_name": "MD Mobil",
+  "description": "Echtzeit-Abfahrten, Live-Netzkarte, Verbindungen und Störungsmeldungen mit Push für Bus & Bahn in Magdeburg.",
+  "lang": "de",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#013b20",
+  "theme_color": "#018e4a",
+  "categories": ["travel", "navigation", "utilities"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "assets/icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Abfahrten", "short_name": "Abfahrten", "url": "/?tab=departures", "icons": [{ "src": "assets/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Live-Karte", "short_name": "Karte", "url": "/?tab=map", "icons": [{ "src": "assets/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Störungen", "short_name": "Meldungen", "url": "/?tab=alerts", "icons": [{ "src": "assets/icon-96.png", "sizes": "96x96" }] }
+  ]
+}

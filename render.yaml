@@ -1,11 +1,18 @@
+# Render Blueprint – Magdeburg Mobil
+# App + API laufen zusammen in EINEM Python-Dienst (https://mvb-app.onrender.com).
 services:
   - type: web
-    name: magdeburg-mobil
-    env: python
+    name: mvb-app
+    runtime: python
     region: frankfurt
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn backend:app
+    startCommand: gunicorn backend:app --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
+    healthCheckPath: /
     envVars:
-      - key: PORT
-        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Feste Push-Schlüssel (optional, empfohlen): sonst erzeugt der Server bei jedem Neustart neue
+      # und die App meldet sich beim nächsten Öffnen automatisch neu an.
+      - key: VAPID_PRIVATE_KEY
+        sync: false
