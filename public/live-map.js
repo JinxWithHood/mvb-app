@@ -82,9 +82,9 @@
     }
 
     function palette() {
-        if (theme === 'jinx') return { casing: '#0e0818', rail: '#4a3d63', stop: '#1f2937' };
-        if (theme === 'dark') return { casing: '#1a2023', rail: '#56616b', stop: '#0f1416' };
-        return { casing: '#ffffff', rail: '#4b5260', stop: '#1f2937' };
+        if (theme === 'jinx') return { casing: '#0e0818', rail: '#4a3d63', stop: '#1f2937', asphalt: '#2a2140', mark: '#ff9bd0' };
+        if (theme === 'dark') return { casing: '#1a2023', rail: '#56616b', stop: '#0f1416', asphalt: '#3a4249', mark: '#e8edf0' };
+        return { casing: '#ffffff', rail: '#4b5260', stop: '#1f2937', asphalt: '#5d666e', mark: '#ffffff' };
     }
 
     function luminance(hex) {
@@ -363,13 +363,14 @@
             if (existing && existing.sig === sig) { existing.meta = line; return; }
             if (existing) existing.layers.forEach(({ layer }) => map.removeLayer(layer));
             const isBus = line.type === 'bus';
-            const roles = isBus ? ['casing', 'line'] : ['casing', 'line', 'gap'];
+            // trams are drawn as a track (sleepers + two rails), buses as a road (kerbs, asphalt, centre line)
+            const roles = isBus ? ['edge', 'asphalt', 'center'] : ['casing', 'sleepers', 'rails', 'gap'];
             const layers = roles.map(role => {
                 const layer = L.polyline(line.shapes, {
                     pane: isBus ? 'buslines' : 'tramlines',
-                    interactive: role === 'casing' || role === 'line',
+                    interactive: role === 'casing' || role === 'rails' || role === 'edge',
                     bubblingMouseEvents: false,
-                    lineCap: 'round',
+                    lineCap: role === 'sleepers' || role === 'center' ? 'butt' : 'round',
                     lineJoin: 'round',
                 });
                 layer.on('click', () => setLineFocus(line.key));
@@ -407,15 +408,21 @@
             if (focus && focus.kind === 'trip') k = 0.12;
             if (!show) k = 0;
             const strong = focus && focus.kind === 'line' && focus.key === key;
+            const detail = z >= 14;          // close enough to see rails / road markings
+            const f = strong ? 1.35 : 1;
             e.layers.forEach(({ layer, role }) => {
                 if (e.isBus) {
-                    const busOp = z <= 12 ? 0.45 : 0.72;
-                    if (role === 'casing') layer.setStyle({ color: p.casing, weight: (strong ? 7 : 3.6) * s, opacity: (strong ? 0.95 : 0.6) * k });
-                    else layer.setStyle({ color: c, weight: (strong ? 4.5 : 2) * s, opacity: (strong ? 1 : busOp) * k });
+                    // road: coloured kerbs, grey asphalt, dashed white centre line
+                    const busOp = z <= 12 ? 0.45 : 0.8;
+                    if (role === 'edge') layer.setStyle({ color: c, weight: (detail ? 7 : 2.2) * s * f, opacity: (strong ? 1 : busOp) * k });
+                    else if (role === 'asphalt') layer.setStyle({ color: p.asphalt, weight: detail ? 4.6 * s * f : 0, opacity: detail ? 0.95 * k : 0 });
+                    else if (role === 'center') layer.setStyle({ color: p.mark, weight: detail ? 0.9 * s * f : 0, opacity: detail ? 0.9 * k : 0, dashArray: `${3.5 * s} ${4 * s}` });
                 } else {
-                    if (role === 'casing') layer.setStyle({ color: p.casing, weight: (strong ? 11 : 8) * s, opacity: (focus ? (strong ? 1 : 0) : 0.9) * k });
-                    else if (role === 'line') layer.setStyle({ color: c, weight: (strong ? 7.5 : 5) * s, opacity: 0.95 * k });
-                    else if (role === 'gap') layer.setStyle({ color: p.casing, weight: z >= 14 ? (strong ? 2.2 : 1.6) * s : 0, opacity: z >= 14 ? k : 0 });
+                    // track: sleepers across, two rails in the line colour
+                    if (role === 'casing') layer.setStyle({ color: p.casing, weight: (detail ? 13 : 8) * s * f, opacity: (focus ? (strong ? 1 : 0) : 0.9) * k });
+                    else if (role === 'sleepers') layer.setStyle({ color: c, weight: detail ? 11.5 * s * f : 0, opacity: detail ? 0.45 * k : 0, dashArray: `${1.7 * s} ${4.2 * s}` });
+                    else if (role === 'rails') layer.setStyle({ color: c, weight: (detail ? 6.4 : 5) * s * f, opacity: 0.95 * k });
+                    else if (role === 'gap') layer.setStyle({ color: p.casing, weight: detail ? 3 * s * f : 0, opacity: detail ? k : 0 });
                 }
             });
             if (strong) e.layers.forEach(({ layer }) => layer.bringToFront());
@@ -1082,9 +1089,10 @@
             const done = L.polyline([], { pane: 'focusLow', interactive: false, color: r.color, opacity: 0.5, lineCap: 'round', lineJoin: 'round' });
             const casing = L.polyline([], { pane: 'focusHigh', interactive: false, color: p.casing, opacity: 1, lineCap: 'round', lineJoin: 'round' });
             const line = L.polyline([], { pane: 'focusHigh', interactive: false, color: r.color, opacity: 1, lineCap: 'round', lineJoin: 'round' });
-            const flow = L.polyline([], { pane: 'focusHigh', interactive: false, color: '#ffffff', opacity: 0.9, lineCap: 'round', className: 'mf-flow' });
-            [done, casing, line, flow].forEach(l => focus.group.addLayer(l));
-            return { r, done, casing, line, flow };
+            const mid = L.polyline([], { pane: 'focusHigh', interactive: false, color: p.casing, opacity: 1, lineCap: 'round', lineJoin: 'round' });
+            const flow = L.polyline([], { pane: 'focusHigh', interactive: false, color: '#ffffff', opacity: 0.9, lineCap: 'butt', className: 'mf-flow' });
+            [done, casing, line, mid, flow].forEach(l => focus.group.addLayer(l));
+            return { r, done, casing, line, mid, flow };
         });
         // stops
         focus.stopMarks = (trip.stops || []).filter(s => s.lat).map((s, i, arr) => {
@@ -1109,18 +1117,29 @@
         const cut = pr ? pr.along : 0;
         focus.progress = pr;
         const s = zoomScale();
-        focus.layers.forEach(({ r, done, casing, line, flow }) => {
+        const isBus = vehicleGroup(focus.entry.trip.type) === 'bus';
+        const p = palette();
+        focus.layers.forEach(({ r, done, casing, line, mid, flow }) => {
             const a = r.from, b = r.to;
             done.setLatLngs(ptsBetween(prep.sh, a, Math.min(b, cut)));
             const rem = ptsBetween(prep.sh, Math.max(a, cut), b);
             casing.setLatLngs(rem);
             line.setLatLngs(rem);
+            mid.setLatLngs(rem);
             flow.setLatLngs(rem);
             if (restyle) {
                 done.setStyle({ weight: 4 * s, dashArray: `${0.1} ${9 * s}`, opacity: 0.75 });
-                casing.setStyle({ weight: 12 * s });
-                line.setStyle({ weight: 7.5 * s });
-                flow.setStyle({ weight: 2.4 * s, dashArray: `${2 * s} ${14 * s}` });
+                casing.setStyle({ weight: 14 * s, color: p.casing });
+                line.setStyle({ weight: 10 * s });
+                if (isBus) {
+                    // road: kerbs in line colour, asphalt, moving white centre markings
+                    mid.setStyle({ weight: 7 * s, color: p.asphalt });
+                    flow.setStyle({ weight: 1.3 * s, color: p.mark, dashArray: `${5 * s} ${11 * s}` });
+                } else {
+                    // track: two rails, sleepers running along the remaining route
+                    mid.setStyle({ weight: 4.4 * s, color: p.casing });
+                    flow.setStyle({ weight: 12.5 * s, color: r.color, opacity: 0.5, dashArray: `${2 * s} ${14 * s}` });
+                }
             }
         });
         // passed / upcoming stops
