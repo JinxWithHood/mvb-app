@@ -231,6 +231,13 @@ try:
     # gzip/brotli for HTML, JS, CSS and JSON – saves ~70 % of the (limited) free bandwidth
     from flask_compress import Compress
     Compress(app)
+
+    @app.after_request
+    def _allow_static_compression(resp):
+        # static files are streamed (direct_passthrough), which flask-compress skips – buffer text files
+        if resp.direct_passthrough and (resp.mimetype or '').startswith(('text/', 'application/javascript', 'application/json', 'application/manifest', 'image/svg')):
+            resp.direct_passthrough = False
+        return resp
 except Exception:
     pass
 CORS(app)
