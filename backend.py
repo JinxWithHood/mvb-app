@@ -4147,12 +4147,28 @@ def push_remind():
     return jsonify({'ok': True, 'reminder': rem, 'reminders': sub['reminders']})
 
 
+_BOOT_TS = time.time()
+_tick_log = []   # recent keep-alive pings: (ts, user agent)
+
+
 @app.route('/api/push/tick')
 def push_tick_route():
     """Can be pinged by an external cron job (keeps a free Render instance awake)."""
+    now_ts = time.time()
+    _tick_log.append((now_ts, (request.headers.get('User-Agent') or '')[:60]))
+    del _tick_log[:-30]
     _ensure_push_watcher()
     res = _push_tick(force=request.args.get('force') == '1')
-    return jsonify({'ok': True, 'subscribers': len(_subs()), 'storage': 'upstash' if _kv_enabled() else 'temporär', **(res or {})})
+    gaps = [round((b[0] - a[0]) / 60, 1) for a, b in zip(_tick_log, _tick_log[1:])]
+    return jsonify({
+        'ok': True, 'subscribers': len(_subs()),
+        'storage': 'upstash' if _kv_enabled() else 'temporär',
+        # diagnostics: how long this instance has been up and how regular the pings are
+        'uptimeMin': round((now_ts - _BOOT_TS) / 60, 1),
+        'ticksSinceBoot': len(_tick_log),
+        'tickGapsMin': gaps[-10:],
+        'lastAgents': sorted({a for _, a in _tick_log[-10:]}),
+        **(res or {})})
 
 
 if __name__ == '__main__':
