@@ -8081,3 +8081,34 @@ body.map-fullscreen .tab-nav-mobile {
   border-radius: 7px;
 }
 
+
+/* Focus card fixes: solid action bar (stop dots must not shine through), above the zoom buttons */
+.map-focus {
+  z-index: 1100;
+  max-height: calc(100% - 190px);
+}
+
+.mf-actions {
+  z-index: 5;
+  background: var(--card-solid);
+  border-top: 1px solid var(--card-border);
+  box-shadow: 0 -10px 14px -10px rgba(0, 0, 0, 0.35);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.mf-actions .mf-btn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mf-actions .mf-btn.ghost {
+  flex: 0 1 auto;
+  padding: 9px 9px;
+}
+
+@media (max-width: 720px) {
+  .map-focus {
+    max-height: 40%;
+  }
+}
