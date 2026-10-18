@@ -8050,11 +8050,15 @@ body.map-fullscreen .tab-nav-mobile {
   display: flex;
 }
 
+.hst-full .hst-plate {
+  width: max-content;
+}
+
 .hst-lines {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  max-width: 120px;
+  max-width: 104px;
 }
 
 .hst-l {
