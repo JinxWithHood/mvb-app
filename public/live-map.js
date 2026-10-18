@@ -271,7 +271,7 @@
             if (!data.lines && !data.tracks) throw new Error(data.error || 'keine Daten');
             networkData = data;
             drawTracks(data);
-            drawStations(data);
+            drawStations();
             networkLoaded = true;
         } catch (e) {
             console.warn('Netz konnte nicht geladen werden:', e);
@@ -303,33 +303,87 @@
         });
     }
 
-    function drawStations(data) {
-        stationLayer = L.layerGroup();
-        const colorOf = (ref) => {
-            const sh = lineShapes.get(`tram:${ref}`);
-            if (sh) return sh.meta.color;
-            const ln = (data.lines || []).find(x => x.ref === ref);
-            return ln ? ln.color : '#888';
+    // ---------------------------------------------------------
+    // Stops as real "Haltestellenschild": yellow circle with green H + the lines serving it
+    // (lines per stop come from the live trips; OSM tram stops fill the gaps)
+    // ---------------------------------------------------------
+    let stationSig = '';
+    const normStop = (n) => String(n || '').replace(/^Magdeburg,\s*/i, '').trim();
+
+    function drawStations() {
+        if (!map) return;
+        const stops = new Map(); // name -> {name, lat, lon, n, lines:Set}
+        const add = (name, lat, lon, key) => {
+            const nm = normStop(name);
+            if (!nm || lat == null) return;
+            let st = stops.get(nm);
+            if (!st) { st = { name: nm, lat, lon, n: 0, lines: new Set() }; stops.set(nm, st); }
+            st.n++;
+            st.lat += (lat - st.lat) / st.n;
+            st.lon += (lon - st.lon) / st.n;
+            if (key) st.lines.add(key);
         };
-        (data.stations || []).forEach(st => {
-            const m = L.circleMarker([st.lat, st.lon], {
-                pane: 'stations', radius: 4, weight: 2, color: palette().stop, fillColor: '#ffffff', fillOpacity: 1,
+        lineShapes.forEach((e, key) => (e.meta.stops || []).forEach(([nm, lat, lon]) => add(nm, lat, lon, key)));
+        // OSM tram stops: merge into a live stop with the same name or within ~80 m, otherwise add
+        const near = (lat, lon) => {
+            let best = null, bd = 80;
+            stops.forEach(st => {
+                const d = Math.hypot((st.lat - lat) * M_LAT, (st.lon - lon) * M_LON);
+                if (d < bd) { bd = d; best = st; }
             });
+            return best;
+        };
+        ((networkData && networkData.stations) || []).forEach(st => {
+            const nm = normStop(st.name);
+            let target = stops.get(nm) || near(st.lat, st.lon);
+            if (!target) {
+                add(st.name, st.lat, st.lon, null);
+                target = stops.get(nm);
+            }
+            if (target) (st.lines || []).forEach(r => target.lines.add(`tram:${r}`));
+        });
+        const sig = [...stops.values()].map(st => st.name + ':' + [...st.lines].sort().join(',')).sort().join('|');
+        if (sig === stationSig && stationLayer) return;
+        stationSig = sig;
+        const wasOn = stationLayer && map.hasLayer(stationLayer);
+        if (stationLayer) map.removeLayer(stationLayer);
+        stationLayer = L.layerGroup();
+        const sortKeys = (a, b) => (a.startsWith('tram:') ? 0 : 1) - (b.startsWith('tram:') ? 0 : 1) || keyNum(a) - keyNum(b) || a.localeCompare(b);
+        stops.forEach(st => {
+            const keys = [...st.lines].sort(sortKeys);
+            const badges = keys.map(k => {
+                const c = colorForKey(k);
+                return `<span class="hst-l${k.startsWith('bus:') ? ' bus' : ''}${darkText(c)}" style="--lc:${c}">${escapeHtml(keyShort(k))}</span>`;
+            }).join('');
+            const icon = L.divIcon({
+                className: 'hst-icon',
+                iconSize: [0, 0],
+                html: `<div class="hst${keys.length ? '' : ' no-lines'}"><div class="hst-pole"></div><div class="hst-h">H</div><div class="hst-plate"><span class="hst-name">${escapeHtml(st.name)}</span>${badges ? `<span class="hst-lines">${badges}</span>` : ''}</div></div>`,
+            });
+            const m = L.marker([st.lat, st.lon], { icon, pane: 'stations', keyboard: false, bubblingMouseEvents: false });
             m.bindTooltip(() => {
-                const badges = (st.lines || []).map(r => {
-                    const c = colorOf(r);
-                    return `<span class="map-line-badge${darkText(c)}" style="background:${c}">${escapeHtml(r)}</span>`;
+                const tb = keys.map(k => {
+                    const c = colorForKey(k);
+                    return `<span class="map-line-badge${darkText(c)}" style="background:${c}">${escapeHtml(keyShort(k))}</span>`;
                 }).join('');
-                return `<div class="map-tip"><strong>${escapeHtml(st.name)}</strong><div class="map-tip-lines">${badges}</div></div>`;
-            }, { direction: 'top', offset: [0, -6], className: 'map-tooltip', opacity: 1 });
+                return `<div class="map-tip"><strong>${escapeHtml(st.name)}</strong>${tb ? `<div class="map-tip-lines">${tb}</div>` : ''}</div>`;
+            }, { direction: 'top', offset: [0, -10], className: 'map-tooltip', opacity: 1 });
             m.addTo(stationLayer);
         });
+        if (wasOn) stationLayer.addTo(map);
         updateStationVisibility();
     }
 
     function updateStationVisibility() {
         if (!map || !stationLayer) return;
-        const show = map.getZoom() >= 14 || (map.getZoom() >= 13 && !focus);
+        const z = map.getZoom();
+        const el = map.getContainer();
+        // dots → small H signs → full signs with line badges
+        el.classList.toggle('hst-dots', z < 14);
+        el.classList.toggle('hst-sign', z === 14);
+        el.classList.toggle('hst-full', z >= 15);
+        el.classList.toggle('hst-names', z >= 17);
+        const show = z >= 14 || (z >= 13 && !focus);
         if (show && !map.hasLayer(stationLayer)) stationLayer.addTo(map);
         if (!show && map.hasLayer(stationLayer)) map.removeLayer(stationLayer);
     }
@@ -387,6 +441,7 @@
         applyLineOffsets();
         restackLines();
         applyLineStyles();
+        drawStations();
         rebuildLegend();
         if (focus && focus.kind === 'line') renderFocusCard();
     }
@@ -499,7 +554,7 @@
         const z = map.getZoom();
         const s = zoomScale();
         const detail = z >= 14;
-        return isBus ? (detail ? 8 : 2.8) * s : (detail ? 7.6 : 5.4) * s;
+        return isBus ? (detail ? 8 : 2.8) * s : (detail ? 5.4 : 3.9) * s;
     }
 
     function applyLineOffsets() {
@@ -563,10 +618,10 @@
                     else if (role === 'center') layer.setStyle({ color: p.mark, weight: detail ? 0.9 * s * f : 0, opacity: detail ? 0.9 * k : 0, dashArray: `${3.5 * s} ${4 * s}` });
                 } else {
                     // track: sleepers across, two rails in the line colour
-                    if (role === 'casing') layer.setStyle({ color: p.casing, weight: (detail ? 13 : 8) * s * f, opacity: (focus ? (strong ? 1 : 0) : 0.9) * k });
-                    else if (role === 'sleepers') layer.setStyle({ color: c, weight: detail ? 11.5 * s * f : 0, opacity: detail ? 0.45 * k : 0, dashArray: `${1.7 * s} ${4.2 * s}` });
-                    else if (role === 'rails') layer.setStyle({ color: c, weight: (detail ? 6.4 : 5) * s * f, opacity: 0.95 * k });
-                    else if (role === 'gap') layer.setStyle({ color: p.casing, weight: detail ? 3 * s * f : 0, opacity: detail ? k : 0 });
+                    if (role === 'casing') layer.setStyle({ color: p.casing, weight: (detail ? 8.5 : 5.6) * s * f, opacity: (focus ? (strong ? 0.9 : 0) : 0.75) * k });
+                    else if (role === 'sleepers') layer.setStyle({ color: c, weight: detail ? 7.6 * s * f : 0, opacity: detail ? 0.28 * k : 0, dashArray: `${1.3 * s} ${4 * s}` });
+                    else if (role === 'rails') layer.setStyle({ color: c, weight: (detail ? 4.4 : 3.4) * s * f, opacity: 0.82 * k });
+                    else if (role === 'gap') layer.setStyle({ color: p.casing, weight: detail ? 2.2 * s * f : 0, opacity: detail ? 0.9 * k : 0 });
                 }
             });
             if (strong) e.layers.forEach(({ layer }) => layer.bringToFront());
@@ -1589,7 +1644,7 @@
         if (shell) shell.setAttribute('data-theme', theme);
         if (tileLayer) tileLayer.setUrl(tileUrl('base'));
         if (labelLayer) labelLayer.setUrl(tileUrl('labels'));
-        if (stationLayer) stationLayer.eachLayer(m => m.setStyle({ color: palette().stop }));
+
         applyAllStyles();
         if (focus && focus.kind === 'trip') buildTripLayers();
     };

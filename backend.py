@@ -3312,7 +3312,7 @@ def get_trip():
 # -------------------------------------------------------------------
 # Current line shapes (built in the background from live trips)
 # -------------------------------------------------------------------
-LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes.json')
+LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes_v3.json')
 LINE_SHAPES_MAX_AGE = 12 * 3600
 _line_shapes = {'loaded': False, 'lines': {}}
 _line_shapes_lock = threading.Lock()
@@ -3373,6 +3373,14 @@ def _line_shapes_job(jobs):
                         entry.update(meta)
                     entry.setdefault('changes', {})
                     entry['shapes'][f"{direction}|{trip.get('short')}" if pkey != key else direction] = {'ts': time.time(), 'pts': simp}
+                # remember which stops each line serves (for the stop signs on the map)
+                types = trip.get('types') or {}
+                for st in trip.get('stops') or []:
+                    if st.get('lat') is None or not st.get('name'):
+                        continue
+                    sk = _line_key({'type': types.get(st.get('short'), trip.get('type')), 'short': st.get('short'), 'line': st.get('line')})
+                    if sk and sk in _line_shapes['lines']:
+                        _line_shapes['lines'][sk].setdefault('stops', {})[st['name']] = [round(st['lat'], 5), round(st['lon'], 5)]
                 for ch in changes:
                     for ck in (ch['fromKey'], ch['toKey']):
                         if ck in _line_shapes['lines']:
@@ -3456,6 +3464,7 @@ def get_line_shapes():
             'key': e['key'], 'short': e.get('short'), 'line': e.get('line'), 'type': e.get('type'),
             'color': e.get('color'), 'shapes': [s['pts'] for s in e['shapes'].values()],
             'changes': [{k: v for k, v in c.items() if k != 'ts'} for c in (e.get('changes') or {}).values()],
+            'stops': [[n, ll[0], ll[1]] for n, ll in (e.get('stops') or {}).items()],
         } for e in _line_shapes['lines'].values()]
     return jsonify({'lines': out, 'pending': len(jobs), 'building': _line_shapes_worker['running']})
 
