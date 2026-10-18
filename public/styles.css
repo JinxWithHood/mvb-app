@@ -4455,9 +4455,9 @@ a:focus-visible,
 }
 
 @keyframes tramDrive {
-  0% { transform: translateX(-190%); }
+  0% { transform: translateX(90%); }
   38%, 62% { transform: translateX(-50%); }
-  100% { transform: translateX(90%); }
+  100% { transform: translateX(-190%); }
 }
 
 @keyframes tramIdle {
@@ -5850,8 +5850,8 @@ body.map-fullscreen .tab-nav-mobile {
 }
 
 @keyframes mapTramRun {
-  0% { transform: translateX(-180px); }
-  100% { transform: translateX(400px); }
+  0% { transform: translateX(400px); }
+  100% { transform: translateX(-180px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

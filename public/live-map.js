@@ -249,6 +249,7 @@
             if (!show && map.hasLayer(labelLayer)) map.removeLayer(labelLayer);
         };
         map.on('zoomend', () => {
+            applyLineOffsets();
             applyAllStyles();
             updateStationVisibility();
             updateLabels();
@@ -382,13 +383,156 @@
             });
             lineShapes.set(line.key, { meta: line, layers, sig, isBus });
         });
-        // draw low numbers on top (classic trunk lines)
-        [...lineShapes.entries()]
-            .sort((a, b) => keyNum(b[0]) - keyNum(a[0]))
-            .forEach(([, e]) => e.layers.forEach(({ layer }) => layer.bringToFront()));
+        computeBundles();
+        applyLineOffsets();
+        restackLines();
         applyLineStyles();
         rebuildLegend();
         if (focus && focus.kind === 'line') renderFocusCard();
+    }
+
+    // ---------------------------------------------------------
+    // Shared corridors: lines that use the same street / track are drawn
+    // side by side (like on a transit map) instead of on top of each other.
+    // ---------------------------------------------------------
+    const BUNDLE_STEP_M = 14;    // resampling distance
+    const BUNDLE_CELL_M = 22;    // grid cell for "same corridor"
+    const BUNDLE_MAX_ANGLE = 32; // degrees – crossings are not corridors
+
+    function resampleShape(pts) {
+        if (pts.length < 2) return pts.slice();
+        const out = [pts[0]];
+        let carry = 0;
+        for (let i = 1; i < pts.length; i++) {
+            const a = pts[i - 1], b = pts[i];
+            const dx = (b[1] - a[1]) * M_LON, dy = (b[0] - a[0]) * M_LAT;
+            const len = Math.hypot(dx, dy);
+            if (len < 0.01) continue;
+            let t = BUNDLE_STEP_M - carry;
+            while (t <= len) {
+                out.push([a[0] + (b[0] - a[0]) * t / len, a[1] + (b[1] - a[1]) * t / len]);
+                t += BUNDLE_STEP_M;
+            }
+            carry = len - (t - BUNDLE_STEP_M);
+        }
+        const last = pts[pts.length - 1];
+        const prev = out[out.length - 1];
+        if (prev[0] !== last[0] || prev[1] !== last[1]) out.push(last);
+        return out;
+    }
+
+    function computeBundles() {
+        ['tram', 'bus'].forEach(mode => {
+            const entries = [...lineShapes.entries()].filter(([, e]) => (mode === 'bus') === !!e.isBus);
+            const cells = new Map(); // cell -> Map(lineKey -> [angles])
+            const prepared = entries.map(([key, e]) => {
+                const shapes = (e.meta.shapes || []).map(sh => {
+                    const pts = resampleShape(sh);
+                    const n = pts.length;
+                    const dir = new Array(n);
+                    for (let i = 0; i < n; i++) {
+                        const a = pts[Math.max(0, i - 2)], b = pts[Math.min(n - 1, i + 2)];
+                        let ue = (b[1] - a[1]) * M_LON, un = (b[0] - a[0]) * M_LAT;
+                        const l = Math.hypot(ue, un) || 1;
+                        dir[i] = [ue / l, un / l];
+                    }
+                    return { pts, dir };
+                });
+                shapes.forEach(sh => sh.pts.forEach((p, i) => {
+                    const cx = Math.round(p[1] * M_LON / BUNDLE_CELL_M), cy = Math.round(p[0] * M_LAT / BUNDLE_CELL_M);
+                    const ck = cx + '|' + cy;
+                    let m = cells.get(ck);
+                    if (!m) { m = new Map(); cells.set(ck, m); }
+                    const ang = (Math.atan2(sh.dir[i][1], sh.dir[i][0]) * 180 / Math.PI + 360) % 180;
+                    if (!m.has(key)) m.set(key, []);
+                    const arr = m.get(key);
+                    if (arr.length < 4) arr.push(ang);
+                }));
+                return { key, e, shapes };
+            });
+            const order = (a, b) => keyNum(a) - keyNum(b) || String(a).localeCompare(String(b));
+            const angDiff = (a, b) => { const d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); };
+            prepared.forEach(({ key, e, shapes }) => {
+                e.bundled = shapes.map(sh => {
+                    const n = sh.pts.length;
+                    const raw = new Array(n);
+                    for (let i = 0; i < n; i++) {
+                        const p = sh.pts[i];
+                        const ang = (Math.atan2(sh.dir[i][1], sh.dir[i][0]) * 180 / Math.PI + 360) % 180;
+                        const cx = Math.round(p[1] * M_LON / BUNDLE_CELL_M), cy = Math.round(p[0] * M_LAT / BUNDLE_CELL_M);
+                        const members = new Set([key]);
+                        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+                            const m = cells.get((cx + ox) + '|' + (cy + oy));
+                            if (!m) continue;
+                            m.forEach((angs, k) => {
+                                if (k !== key && angs.some(a => angDiff(a, ang) < BUNDLE_MAX_ANGLE)) members.add(k);
+                            });
+                        }
+                        const list = [...members].sort(order);
+                        raw[i] = list.indexOf(key) - (list.length - 1) / 2;
+                    }
+                    // smooth the slot changes so lines merge/split with a soft curve instead of a jump
+                    const off = new Array(n);
+                    const W = 4;
+                    for (let i = 0; i < n; i++) {
+                        let sum = 0, cnt = 0;
+                        for (let j = Math.max(0, i - W); j <= Math.min(n - 1, i + W); j++) { sum += raw[j]; cnt++; }
+                        off[i] = sum / cnt;
+                    }
+                    // stable side: the same corridor gets the same order in both travel directions
+                    const sign = new Array(n);
+                    const ref = [Math.cos(Math.PI / 3), Math.sin(Math.PI / 3)];
+                    let state = (sh.dir[0][0] * ref[0] + sh.dir[0][1] * ref[1]) >= 0 ? 1 : -1;
+                    for (let i = 0; i < n; i++) {
+                        const dot = sh.dir[i][0] * ref[0] + sh.dir[i][1] * ref[1];
+                        if (state > 0 && dot < -0.34) state = -1;
+                        else if (state < 0 && dot > 0.34) state = 1;
+                        sign[i] = state;
+                    }
+                    return { pts: sh.pts, dir: sh.dir, off, sign };
+                });
+            });
+        });
+    }
+
+    function lineSpacingPx(isBus) {
+        const z = map.getZoom();
+        const s = zoomScale();
+        const detail = z >= 14;
+        return isBus ? (detail ? 8 : 2.8) * s : (detail ? 7.6 : 5.4) * s;
+    }
+
+    function applyLineOffsets() {
+        if (!map) return;
+        const z = map.getZoom();
+        lineShapes.forEach(e => {
+            if (!e.bundled) return;
+            const spacing = lineSpacingPx(e.isBus);
+            const shapes = e.bundled.map(sh => sh.pts.map((p, i) => {
+                const o = sh.off[i];
+                if (!o) return p;
+                const pp = map.project(p, z);
+                const d = sh.dir[i];
+                // screen direction = (east, -north); its normal = (north, east)
+                const nx = d[1] * sh.sign[i], ny = d[0] * sh.sign[i];
+                const ll = map.unproject([pp.x + nx * o * spacing, pp.y + ny * o * spacing], z);
+                return [ll.lat, ll.lng];
+            }));
+            e.layers.forEach(({ layer }) => layer.setLatLngs(shapes));
+        });
+    }
+
+    // all casings below all rails, so neighbouring lines in a bundle don't hide each other
+    function restackLines() {
+        const groups = [
+            { bus: false, roles: ['casing', 'sleepers', 'rails', 'gap'] },
+            { bus: true, roles: ['edge', 'asphalt', 'center'] },
+        ];
+        const sorted = [...lineShapes.entries()].sort((a, b) => keyNum(b[0]) - keyNum(a[0]));
+        groups.forEach(g => g.roles.forEach(role => sorted.forEach(([, e]) => {
+            if (!!e.isBus !== g.bus) return;
+            e.layers.forEach(l => { if (l.role === role) l.layer.bringToFront(); });
+        })));
     }
 
     function lineVisible(entry) {
@@ -427,6 +571,7 @@
             });
             if (strong) e.layers.forEach(({ layer }) => layer.bringToFront());
         });
+        if (!focus || focus.kind !== 'line') restackLines();
     }
 
     function applyAllStyles() {
