@@ -3048,6 +3048,7 @@ def get_radar():
             # so a stop only counts if its realtime is not later than the following stop's realtime.
             now_hms = now.strftime('%H%M%S')
             next_stop, delay_min = '', None
+            rt_state = 'ok'
 
             def to_sec(v):
                 v = str(v)[-6:]
@@ -3091,6 +3092,17 @@ def get_radar():
                     if diff is not None:
                         # round to whole minutes like the departure boards (< 30 s counts as on time)
                         delay_min = int(diff / 60.0 + (0.5 if diff >= 0 else -0.5)) if abs(diff) >= 30 else 0
+                    # big deviations are cross-checked against the stop's board (see _rt_checked_delay)
+                    if delay_min is not None and abs(delay_min) >= RT_VERIFY_MIN and vtype in ('tram', 'bus', 'sev'):
+                        loc = loc_l[lx] if lx is not None and lx < len(loc_l) else {}
+                        ext_id = loc.get('extId')
+                        if not ext_id:
+                            m_l = re.search(r'@L=(\d+)@', loc.get('lid') or '')
+                            ext_id = m_l.group(1) if m_l else None
+                        planned_dt = _hafas_dt(jny.get('date') or now.strftime('%Y%m%d'),
+                                               chosen.get('dTimeS') or chosen.get('aTimeS'))
+                        is_last = chosen is stops_l[-1] or not (chosen.get('dTimeS') or chosen.get('dTimeR'))
+                        delay_min, rt_state = _rt_checked_delay(jny.get('jid'), delay_min, ext_id, planned_dt, is_last)
             except Exception:
                 delay_min = None
 
@@ -3115,6 +3127,7 @@ def get_radar():
                 'track': track,
                 'nextStop': next_stop,
                 'delay': delay_min,
+                'rtState': rt_state,
             })
         except Exception as ex:
             print(f"[WARN] radar parse: {ex}")
@@ -3133,6 +3146,133 @@ import threading
 
 _trip_cache = {}
 _TRIP_CACHE_TTL = 45
+
+
+# -------------------------------------------------------------------
+# Realtime cross-check for the live map
+# HAFAS' position service (JourneyGeoPos) sometimes carries a stale or bogus
+# prognosis for a trip (e.g. +38 while the station board says -2, or "ghost"
+# trips whose delay keeps growing). Big deviations are therefore checked
+# against the departure/arrival board of the vehicle's next stop – the same
+# source the departure list in the app uses – before they are shown.
+# -------------------------------------------------------------------
+from concurrent.futures import ThreadPoolExecutor as _RtPool
+
+RT_VERIFY_MIN = 6          # |delay| from which a value gets verified
+RT_VERIFY_TTL = 75         # seconds a verification result stays valid
+_rt_verify = {}            # jid -> {'ts', 'delay' (int|None), 'found' (bool)}
+_rt_board_cache = {}       # (extId, kind, minute) -> (ts, {zi: delay})
+_rt_pending = set()
+_rt_lock = threading.Lock()
+_rt_pool = _RtPool(max_workers=3)
+
+
+def _jid_zi(jid):
+    m = re.search(r'#ZI#(\d+)#', jid or '')
+    return m.group(1) if m else None
+
+
+def _rt_board(ext_id, when, span_min, kind):
+    """Board around `when` -> {ZI: delay_minutes|None}. Cached briefly."""
+    key = (ext_id, kind, when.strftime('%H%M'), span_min)
+    hit = _rt_board_cache.get(key)
+    if hit and time.time() - hit[0] < 45:
+        return hit[1]
+    client = nasa_client or oebb_client
+    fn = client.arrivals if kind == 'arr' else client.departures
+    legs = fn(station=ext_id, date=when, duration=span_min, max_trips=80) or []
+    out = {}
+    for lg in legs:
+        zi = _jid_zi(str(getattr(lg, 'id', '') or ''))
+        if not zi:
+            continue
+        d = getattr(lg, 'delay', None)
+        out[zi] = int(round(d.total_seconds() / 60)) if d is not None else None
+    _rt_board_cache[key] = (time.time(), out)
+    if len(_rt_board_cache) > 300:
+        for k in sorted(_rt_board_cache, key=lambda k: _rt_board_cache[k][0])[:100]:
+            _rt_board_cache.pop(k, None)
+    return out
+
+
+def _rt_verify_job(jid, ext_id, planned_dt, delay, is_last):
+    try:
+        span = min(150, max(30, abs(delay) + 20))
+        start = planned_dt - datetime.timedelta(minutes=2)
+        board = _rt_board(ext_id, start, span, 'arr' if is_last else 'dep')
+        zi = _jid_zi(jid)
+        if zi in board:
+            res = {'ts': time.time(), 'delay': board[zi], 'found': True}
+        else:
+            res = {'ts': time.time(), 'delay': None, 'found': False}
+    except Exception as ex:
+        print(f"[WARN] rt verify {jid[:30]}: {ex}")
+        res = {'ts': time.time(), 'delay': None, 'found': False, 'error': True}
+    with _rt_lock:
+        _rt_verify[jid] = res
+        _rt_pending.discard(jid)
+        if len(_rt_verify) > 800:
+            for k in sorted(_rt_verify, key=lambda k: _rt_verify[k]['ts'])[:200]:
+                _rt_verify.pop(k, None)
+
+
+def _trip_with_checked_rt(jid, trip):
+    """Keep the trip view consistent with the (board-verified) value on the map."""
+    if not isinstance(trip, dict) or not trip.get('stops'):
+        return trip
+    v = _rt_verify.get(jid)
+    if not v or time.time() - v['ts'] > 3 * RT_VERIFY_TTL or v.get('error'):
+        return trip
+    upcoming = [st for st in trip['stops'] if not st.get('passed')]
+    if not upcoming:
+        return trip
+    cur = upcoming[0].get('delay')
+    want = v['delay'] if v.get('found') else None
+    if cur is not None and want is not None and abs(cur - want) < 3:
+        return trip
+    if cur is None and want is None:
+        return trip
+    fixed = dict(trip)
+    stops = []
+    now = datetime.datetime.now(local_tz)
+    now_min = now.hour * 60 + now.minute
+    for st in trip['stops']:
+        st = dict(st)
+        if not st.get('passed'):
+            st['delay'] = want
+            try:
+                h, m = map(int, st['time'].split(':'))
+                t = (h * 60 + m + (want or 0)) % 1440
+                st['rt'] = f"{t // 60:02d}:{t % 60:02d}" if want is not None else None
+                ahead = (t - now_min + 720) % 1440 - 720   # minutes from now, -720..719
+                st['passed'] = ahead < 0
+            except Exception:
+                if want is None:
+                    st['rt'] = None
+        stops.append(st)
+    fixed['stops'] = stops
+    fixed['rtCorrected'] = True
+    return fixed
+
+
+def _rt_checked_delay(jid, delay, ext_id, planned_dt, is_last):
+    """Returns (delay_to_show, state). state: 'ok' | 'checked' | 'pending' | 'unsure'."""
+    if delay is None or abs(delay) < RT_VERIFY_MIN or not ext_id or planned_dt is None:
+        return delay, 'ok'
+    now_ts = time.time()
+    with _rt_lock:
+        v = _rt_verify.get(jid)
+        fresh = v is not None and now_ts - v['ts'] < RT_VERIFY_TTL
+        if not fresh and jid not in _rt_pending:
+            _rt_pending.add(jid)
+            _rt_pool.submit(_rt_verify_job, jid, ext_id, planned_dt, delay, is_last)
+    if v is None:
+        return None, 'pending'
+    if v.get('found'):
+        return v['delay'], 'checked'
+    if v.get('error'):
+        return delay, 'ok'          # board not reachable: keep HAFAS' own value
+    return None, 'unsure'           # trip not on the board -> don't show a made-up delay
 
 
 def _hafas_dt(date_str, time_str):
@@ -3326,7 +3466,8 @@ def get_trip():
     if not jid:
         return jsonify({'error': 'jid fehlt'}), 400
     try:
-        return jsonify(_fetch_trip(jid, want_raw=request.args.get('raw') == '1'))
+        trip = _fetch_trip(jid, want_raw=request.args.get('raw') == '1')
+        return jsonify(_trip_with_checked_rt(jid, trip))
     except Exception as ex:
         print(f"[WARN] trip {jid[:40]}: {ex}")
         return jsonify({'error': str(ex)}), 502
