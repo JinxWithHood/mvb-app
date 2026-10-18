@@ -8121,3 +8121,39 @@ body.map-fullscreen .tab-nav-mobile {
 .mf-actions .mf-btn.ghost {
   padding: 8px 9px;
 }
+
+/* Line chips: draggable strip with soft edges */
+.map-legend {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  scroll-behavior: auto;
+  overscroll-behavior-x: contain;
+}
+
+.map-legend.dragging {
+  cursor: grabbing;
+}
+
+.map-legend.dragging .map-chip {
+  pointer-events: none;
+}
+
+.map-legend.can-right {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
+}
+
+.map-legend.can-left {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px);
+  mask-image: linear-gradient(90deg, transparent, #000 36px);
+}
+
+.map-legend.can-left.can-right {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent);
+}
+
+.map-legend img {
+  -webkit-user-drag: none;
+}

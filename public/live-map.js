@@ -1562,6 +1562,7 @@
         if (dBtn) dBtn.addEventListener('click', () => setDelayMode(!delayMode));
         setDelayMode(delayMode);
         const legend = $('mapLegend');
+        if (legend) enableLegendDrag(legend);
         if (legend) legend.addEventListener('click', (e) => {
             const chip = e.target.closest('.map-chip');
             if (!chip) return;
@@ -1596,6 +1597,55 @@
             const shell = document.querySelector('.map-shell.fullscreen');
             if (shell) { shell.classList.remove('fullscreen'); document.body.classList.remove('map-fullscreen'); setTimeout(() => map.invalidateSize(), 250); }
         });
+    }
+
+    // Line chips: drag sideways with the mouse, scroll with the wheel, fade at the edges
+    function enableLegendDrag(el) {
+        let down = false, moved = false, startX = 0, startScroll = 0, pid = null;
+        const updateEdges = () => {
+            const max = el.scrollWidth - el.clientWidth;
+            el.classList.toggle('can-left', el.scrollLeft > 2);
+            el.classList.toggle('can-right', el.scrollLeft < max - 2);
+        };
+        el.addEventListener('pointerdown', (e) => {
+            if (e.pointerType !== 'mouse' || e.button !== 0) return; // touch scrolls natively
+            down = true; moved = false; startX = e.clientX; startScroll = el.scrollLeft; pid = e.pointerId;
+        });
+        el.addEventListener('pointermove', (e) => {
+            if (!down) return;
+            const dx = e.clientX - startX;
+            if (!moved && Math.abs(dx) > 5) {
+                moved = true;
+                el.classList.add('dragging');
+                try { el.setPointerCapture(pid); } catch (err) { /* ignore */ }
+            }
+            if (moved) el.scrollLeft = startScroll - dx;
+        });
+        const end = () => {
+            if (!down) return;
+            down = false;
+            el.classList.remove('dragging');
+            try { el.releasePointerCapture(pid); } catch (err) { /* ignore */ }
+            if (moved) {
+                // swallow the click that follows a drag, so dragging doesn't select a line
+                const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                el.addEventListener('click', stop, { capture: true, once: true });
+                setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 50);
+            }
+        };
+        el.addEventListener('pointerup', end);
+        el.addEventListener('pointercancel', end);
+        el.addEventListener('wheel', (e) => {
+            if (el.scrollWidth <= el.clientWidth) return;
+            const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+            if (!d) return;
+            e.preventDefault();
+            el.scrollLeft += d;
+        }, { passive: false });
+        el.addEventListener('scroll', updateEdges, { passive: true });
+        window.addEventListener('resize', updateEdges);
+        new MutationObserver(updateEdges).observe(el, { childList: true });
+        updateEdges();
     }
 
     // ---------------------------------------------------------
