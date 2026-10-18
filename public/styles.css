@@ -8160,31 +8160,19 @@ body.map-fullscreen .tab-nav-mobile {
 
 /* ===========================================================
    32. Vehicle shapes on the live map
-   tram = long articulated Flexity (3 cars, white joints, square line sign)
-   bus  = round puck with direction tip (round line sign)
+   tram = 4-car Flexity (3 white joints, square line sign)
+   bus  = 2-part articulated bus (1 joint, boxier, round line sign)
    =========================================================== */
 .mv-tram .mv-body {
   --body: var(--c);
-  width: 44px;
+  width: 48px;
   height: 13px;
-  border-radius: 7px 7px 7px 7px / 6.5px 6.5px 6.5px 6.5px;
+  border-radius: 6.5px;
   background: linear-gradient(90deg,
-    var(--body) 0 30.5%, rgba(255, 255, 255, 0.95) 30.5% 34%,
-    var(--body) 34% 66%, rgba(255, 255, 255, 0.95) 66% 69.5%,
-    var(--body) 69.5% 100%);
-}
-
-/* pantograph on the roof of the middle car */
-.mv-tram .mv-body::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 7px;
-  height: 7px;
-  transform: translate(-50%, -50%) rotate(45deg);
-  border: 1.5px solid rgba(255, 255, 255, 0.95);
-  border-radius: 1px;
+    var(--body) 0 23.5%, rgba(255, 255, 255, 0.95) 23.5% 26.5%,
+    var(--body) 26.5% 48.5%, rgba(255, 255, 255, 0.95) 48.5% 51.5%,
+    var(--body) 51.5% 73.5%, rgba(255, 255, 255, 0.95) 73.5% 76.5%,
+    var(--body) 76.5% 100%);
 }
 
 .mv-tram .mv-nose {
@@ -8193,22 +8181,24 @@ body.map-fullscreen .tab-nav-mobile {
 
 .mv-bus .mv-body {
   --body: var(--c);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--body);
+  width: 30px;
+  height: 13px;
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    var(--body) 0 47%, rgba(255, 255, 255, 0.95) 47% 53%,
+    var(--body) 53% 100%);
 }
 
-/* little windscreen bar so the puck reads as a vehicle */
+/* windscreen at the front */
 .mv-bus .mv-body::before {
   content: '';
   position: absolute;
-  right: 3px;
+  right: 2px;
   top: 50%;
-  width: 3px;
-  height: 9px;
+  width: 2.5px;
+  height: 7px;
   transform: translateY(-50%);
-  border-radius: 2px;
+  border-radius: 1.5px;
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -8238,23 +8228,19 @@ body.map-fullscreen .tab-nav-mobile {
 .map-delaymode .mv-tram .mv-body {
   --body: var(--dc, #94a3b8);
   background: linear-gradient(90deg,
-    var(--body) 0 30.5%, rgba(255, 255, 255, 0.95) 30.5% 34%,
-    var(--body) 34% 66%, rgba(255, 255, 255, 0.95) 66% 69.5%,
-    var(--body) 69.5% 100%);
+    var(--body) 0 23.5%, rgba(255, 255, 255, 0.95) 23.5% 26.5%,
+    var(--body) 26.5% 48.5%, rgba(255, 255, 255, 0.95) 48.5% 51.5%,
+    var(--body) 51.5% 73.5%, rgba(255, 255, 255, 0.95) 73.5% 76.5%,
+    var(--body) 76.5% 100%);
 }
 
 .map-delaymode .mv-bus .mv-body {
-  background: var(--dc, #94a3b8);
+  --body: var(--dc, #94a3b8);
+  background: linear-gradient(90deg,
+    var(--body) 0 47%, rgba(255, 255, 255, 0.95) 47% 53%,
+    var(--body) 53% 100%);
 }
 
 .map-delaymode .mv-bus.dc-dark .mv-body::before {
   background: rgba(0, 0, 0, 0.55);
-}
-
-.mv-bus .mv-label {
-  transform: translate(-50%, calc(-100% - 13px));
-}
-
-.mv-bus.mv-focus .mv-label {
-  transform: translate(-50%, calc(-100% - 16px)) scale(1.15);
 }
