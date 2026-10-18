@@ -8157,3 +8157,104 @@ body.map-fullscreen .tab-nav-mobile {
 .map-legend img {
   -webkit-user-drag: none;
 }
+
+/* ===========================================================
+   32. Vehicle shapes on the live map
+   tram = long articulated Flexity (3 cars, white joints, square line sign)
+   bus  = round puck with direction tip (round line sign)
+   =========================================================== */
+.mv-tram .mv-body {
+  --body: var(--c);
+  width: 44px;
+  height: 13px;
+  border-radius: 7px 7px 7px 7px / 6.5px 6.5px 6.5px 6.5px;
+  background: linear-gradient(90deg,
+    var(--body) 0 30.5%, rgba(255, 255, 255, 0.95) 30.5% 34%,
+    var(--body) 34% 66%, rgba(255, 255, 255, 0.95) 66% 69.5%,
+    var(--body) 69.5% 100%);
+}
+
+/* pantograph on the roof of the middle car */
+.mv-tram .mv-body::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  border-radius: 1px;
+}
+
+.mv-tram .mv-nose {
+  right: -8px;
+}
+
+.mv-bus .mv-body {
+  --body: var(--c);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--body);
+}
+
+/* little windscreen bar so the puck reads as a vehicle */
+.mv-bus .mv-body::before {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  width: 3px;
+  height: 9px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.mv-bus .mv-body.stopped::before {
+  display: none;
+}
+
+.mv-bus .mv-nose {
+  right: -8px;
+}
+
+/* line signs: tram square, bus round (same as the stop pop-ups) */
+.mv-tram .mv-label {
+  border-radius: 4px;
+}
+
+.mv-bus .mv-label {
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+.map-chip.line.bus {
+  border-radius: 999px;
+}
+
+/* punctuality mode keeps the shapes */
+.map-delaymode .mv-tram .mv-body {
+  --body: var(--dc, #94a3b8);
+  background: linear-gradient(90deg,
+    var(--body) 0 30.5%, rgba(255, 255, 255, 0.95) 30.5% 34%,
+    var(--body) 34% 66%, rgba(255, 255, 255, 0.95) 66% 69.5%,
+    var(--body) 69.5% 100%);
+}
+
+.map-delaymode .mv-bus .mv-body {
+  background: var(--dc, #94a3b8);
+}
+
+.map-delaymode .mv-bus.dc-dark .mv-body::before {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.mv-bus .mv-label {
+  transform: translate(-50%, calc(-100% - 13px));
+}
+
+.mv-bus.mv-focus .mv-label {
+  transform: translate(-50%, calc(-100% - 16px)) scale(1.15);
+}
