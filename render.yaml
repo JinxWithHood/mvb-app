@@ -16,3 +16,8 @@ services:
       # und die App meldet sich beim nächsten Öffnen automatisch neu an.
       - key: VAPID_PRIVATE_KEY
         sync: false
+      # Dauerhafter Speicher (kostenlos bei upstash.com): Push-Abos, Wecker und Schlüssel überstehen Neustarts
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false

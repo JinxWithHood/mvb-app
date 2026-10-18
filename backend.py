@@ -227,6 +227,12 @@ CACHE_DIR = os.path.join(BASE_DIR, 'cache')     # runtime caches (not part of th
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
+try:
+    # gzip/brotli for HTML, JS, CSS and JSON – saves ~70 % of the (limited) free bandwidth
+    from flask_compress import Compress
+    Compress(app)
+except Exception:
+    pass
 CORS(app)
 
 @app.after_request
@@ -2780,6 +2786,15 @@ def get_network():
     """Tram network geometry (from OpenStreetMap via Overpass), cached on disk for 7 days."""
     force = request.args.get('refresh') == '1'
     cached = None
+    if not os.path.exists(NETWORK_CACHE_FILE) and not force:
+        remote = _kv_get('network')
+        if remote and remote.get('v') == 2:
+            try:
+                with open(NETWORK_CACHE_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(remote, f, ensure_ascii=False)
+            except Exception:
+                pass
+            return jsonify(remote)
     if os.path.exists(NETWORK_CACHE_FILE):
         try:
             with open(NETWORK_CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -2797,6 +2812,7 @@ def get_network():
                 json.dump(fresh, f, ensure_ascii=False)
         except Exception as ex:
             print(f"[WARN] Could not write network cache: {ex}")
+        _kv_set('network', fresh)
         return jsonify(fresh)
     if cached:
         return jsonify(cached)
@@ -3494,6 +3510,53 @@ PUSH_STATE_FILE = os.path.join(CACHE_DIR, 'push_state.json')
 VAPID_FILE = os.path.join(CACHE_DIR, 'vapid.json')
 VAPID_SUBJECT = os.environ.get('VAPID_SUBJECT', 'https://mvb-app.onrender.com')
 _push_lock = threading.RLock()
+
+# ---- Optional durable storage (Upstash Redis REST, free tier) --------------------------------
+# Render's free disk is wiped on every restart. If UPSTASH_REDIS_REST_URL / _TOKEN are set,
+# push subscriptions, reminders, push state, VAPID keys and the network cache survive restarts.
+KV_URL = os.environ.get('UPSTASH_REDIS_REST_URL', '').rstrip('/')
+KV_TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN', '')
+KV_PREFIX = 'mvb:'
+
+
+def _kv_enabled():
+    return bool(KV_URL and KV_TOKEN)
+
+
+def _kv_get(name):
+    if not _kv_enabled():
+        return None
+    try:
+        r = requests.get(f"{KV_URL}/get/{KV_PREFIX}{name}", headers={'Authorization': f'Bearer {KV_TOKEN}'}, timeout=8)
+        if r.ok:
+            val = (r.json() or {}).get('result')
+            return json.loads(val) if val else None
+        print(f"[WARN] KV get {name}: HTTP {r.status_code}")
+    except Exception as ex:
+        print(f"[WARN] KV get {name}: {ex}")
+    return None
+
+
+def _kv_set(name, data, background=True):
+    if not _kv_enabled():
+        return
+
+    def _do():
+        try:
+            r = requests.post(f"{KV_URL}/set/{KV_PREFIX}{name}", data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
+                              headers={'Authorization': f'Bearer {KV_TOKEN}'}, timeout=10)
+            if not r.ok:
+                print(f"[WARN] KV set {name}: HTTP {r.status_code} {r.text[:120]}")
+        except Exception as ex:
+            print(f"[WARN] KV set {name}: {ex}")
+    if background:
+        threading.Thread(target=_do, daemon=True).start()
+    else:
+        _do()
+
+
+_KV_NAMES = {}  # file path -> kv name (filled below)
+
 _push = {'subs': None, 'state': None, 'vapid': None, 'watcher': False, 'last_tick': 0, 'last_disr': 0}
 
 
@@ -3511,12 +3574,8 @@ def _vapid():
     if _push['vapid']:
         return _push['vapid']
     priv_b64 = os.environ.get('VAPID_PRIVATE_KEY', '').strip()
-    if not priv_b64 and os.path.exists(VAPID_FILE):
-        try:
-            with open(VAPID_FILE, 'r', encoding='utf-8') as f:
-                priv_b64 = json.load(f).get('private', '')
-        except Exception:
-            priv_b64 = ''
+    if not priv_b64:
+        priv_b64 = (_load_json_file(VAPID_FILE, {}) or {}).get('private', '')
     if priv_b64:
         priv_int = int.from_bytes(_b64u_dec(priv_b64), 'big')
         key = ec.derive_private_key(priv_int, ec.SECP256R1())
@@ -3524,12 +3583,10 @@ def _vapid():
         key = ec.generate_private_key(ec.SECP256R1())
         priv_b64 = _b64u(key.private_numbers().private_value.to_bytes(32, 'big'))
         pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-        try:
-            with open(VAPID_FILE, 'w', encoding='utf-8') as f:
-                json.dump({'private': priv_b64, 'public': _b64u(pub)}, f)
-            print("[INFO] Neue VAPID-Schlüssel erzeugt (cache/vapid.json)")
-        except Exception as ex:
-            print(f"[WARN] VAPID-Schlüssel nicht gespeichert: {ex}")
+        _save_json_file(VAPID_FILE, {'private': priv_b64, 'public': _b64u(pub)})
+        if _kv_enabled():
+            _kv_set('vapid', {'private': priv_b64, 'public': _b64u(pub)}, background=False)
+        print("[INFO] Neue VAPID-Schlüssel erzeugt")
     pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
     _push['vapid'] = {'key': key, 'public': _b64u(pub)}
     return _push['vapid']
@@ -3595,10 +3652,18 @@ def _load_json_file(path, default):
                 return json.load(f)
     except Exception as ex:
         print(f"[WARN] {os.path.basename(path)}: {ex}")
+    # nothing on disk (fresh Render instance) -> durable storage
+    name = _KV_NAMES.get(path)
+    if name:
+        data = _kv_get(name)
+        if data is not None:
+            print(f"[INFO] {name} aus dem dauerhaften Speicher geladen")
+            _save_json_file(path, data, kv=False)
+            return data
     return default
 
 
-def _save_json_file(path, data):
+def _save_json_file(path, data, kv=True):
     try:
         tmp = path + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
@@ -3606,6 +3671,12 @@ def _save_json_file(path, data):
         os.replace(tmp, path)
     except Exception as ex:
         print(f"[WARN] {os.path.basename(path)} nicht gespeichert: {ex}")
+    name = _KV_NAMES.get(path)
+    if kv and name:
+        _kv_set(name, data)
+
+
+_KV_NAMES.update({PUSH_SUBS_FILE: 'push_subscriptions', PUSH_STATE_FILE: 'push_state', VAPID_FILE: 'vapid'})
 
 
 def _subs():
@@ -3672,16 +3743,19 @@ def _check_disruptions_for_push():
     if not isinstance(items, list):
         return 0
     state = _push_state()
-    seen = set(state.get('seen') or [])
+    old_seen = list(state.get('seen') or [])
+    seen = set(old_seen)
     current = [d for d in items if d.get('id')]
     new = [d for d in current if d['id'] not in seen]
-    state['seen'] = list(seen | {d['id'] for d in current})[-400:]
+    cur_ids = [d['id'] for d in current]
+    state['seen'] = (cur_ids + [i for i in old_seen if i not in set(cur_ids)])[:400]
     if not state.get('seeded'):
         # first run: remember what already exists, don't spam
         state['seeded'] = True
         _save_json_file(PUSH_STATE_FILE, state)
         return 0
-    _save_json_file(PUSH_STATE_FILE, state)
+    if new:
+        _save_json_file(PUSH_STATE_FILE, state)
     sent = 0
     for d in new:
         lines = _disruption_lines(d)
@@ -3930,7 +4004,7 @@ def push_tick_route():
     """Can be pinged by an external cron job (keeps a free Render instance awake)."""
     _ensure_push_watcher()
     res = _push_tick(force=request.args.get('force') == '1')
-    return jsonify({'ok': True, 'subscribers': len(_subs()), **(res or {})})
+    return jsonify({'ok': True, 'subscribers': len(_subs()), 'storage': 'upstash' if _kv_enabled() else 'temporär', **(res or {})})
 
 
 if __name__ == '__main__':

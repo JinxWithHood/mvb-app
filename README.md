@@ -39,9 +39,11 @@ Der Dienst **mvb-app** (Python) liefert App und API zusammen aus:
 - Build: `pip install -r requirements.txt`
 - Start: `gunicorn backend:app --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT`
 
-Optional:
+Optional (Render → Environment):
 
-- `VAPID_PRIVATE_KEY` als Umgebungsvariable setzen (fester Push-Schlüssel).
+- `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (kostenlose Redis-Datenbank von upstash.com):
+  Push-Abos, Abfahrts-Wecker, Push-Schlüssel und das Gleisnetz überstehen damit jeden Neustart.
+- `VAPID_PRIVATE_KEY` als Umgebungsvariable setzen (fester Push-Schlüssel, nur nötig ohne Upstash).
 - Ein kostenloser Cronjob (z. B. cron-job.org), der alle 10 Minuten `https://mvb-app.onrender.com/api/push/tick`
   aufruft, hält den Gratis-Server wach – nur dann kommen Push-Nachrichten auch nachts zuverlässig an.
 
