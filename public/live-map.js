@@ -1494,7 +1494,7 @@
             </div>
             ${prep.approx ? '<p class="mf-hint">Genauer Linienweg nicht verfügbar – Verbindung zwischen den Halten vereinfacht.</p>' : ''}
             <div class="mf-actions">
-                <button class="mf-btn" data-act="journey">Live-Verlauf öffnen</button>
+                <button class="mf-btn" data-act="journey">Live-Verlauf</button>
                 <button class="mf-btn ghost" data-act="fit">Ganze Fahrt</button>
                 ${st.key ? `<button class="mf-btn ghost" data-act="line" data-key="${escapeHtml(st.key)}">Linie ${escapeHtml(keyShort(st.key))}</button>` : ''}
             </div>`;

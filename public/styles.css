@@ -8112,3 +8112,12 @@ body.map-fullscreen .tab-nav-mobile {
     max-height: 40%;
   }
 }
+
+.mf-actions .mf-btn {
+  font-size: 0.76rem;
+  padding: 8px 10px;
+}
+
+.mf-actions .mf-btn.ghost {
+  padding: 8px 9px;
+}
