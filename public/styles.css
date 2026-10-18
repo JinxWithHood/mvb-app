@@ -7761,14 +7761,15 @@ body.map-fullscreen .tab-nav-mobile {
   border-top: 1px solid rgba(220, 240, 230, 0.25);
 }
 
-/* the tram glides in from the left, the bus comes from the right (mirrored, so it faces forward) */
+/* the tram glides in from the right, the bus drives from left to right */
 .boot-tram {
   position: absolute;
   bottom: 5px;
-  left: -320px;
+  right: -320px;
   width: 300px;
   animation: bootTram 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.15s infinite;
 }
+
 
 .boot-tram-img,
 .boot-bus-img {
@@ -7783,14 +7784,12 @@ body.map-fullscreen .tab-nav-mobile {
 .boot-bus {
   position: absolute;
   bottom: 7px;
-  right: -170px;
+  left: -170px;
   width: 150px;
   animation: bootBus 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.55s infinite;
 }
 
 .boot-bus-img {
-  transform: scaleX(-1);
-  animation-name: bootSwayMirror;
   animation-duration: 0.7s;
 }
 
@@ -7806,15 +7805,15 @@ body.map-fullscreen .tab-nav-mobile {
 }
 
 .boot-tram .boot-beam {
-  left: 100%;
-  margin-left: -4px;
+  right: 100%;
+  margin-right: -4px;
+  transform: scaleX(-1);
 }
 
 .boot-bus .boot-beam {
-  right: 100%;
-  margin-right: -4px;
+  left: 100%;
+  margin-left: -6px;
   bottom: 16%;
-  transform: scaleX(-1);
 }
 
 /* little spark where the pantograph touches the wire */
@@ -7849,13 +7848,13 @@ body.map-fullscreen .tab-nav-mobile {
 .boot-dots i:nth-child(3) { animation-delay: 0.3s; }
 
 @keyframes bootTram {
-  0% { left: -330px; }
-  100% { left: calc(100% + 40px); }
+  0% { right: -330px; }
+  100% { right: calc(100% + 40px); }
 }
 
 @keyframes bootBus {
-  0% { right: -180px; }
-  100% { right: calc(100% + 60px); }
+  0% { left: -180px; }
+  100% { left: calc(100% + 60px); }
 }
 
 @keyframes bootSway {
@@ -7906,7 +7905,7 @@ body.map-fullscreen .tab-nav-mobile {
 
   .boot-tram {
     width: 230px;
-    left: -250px;
+    right: -250px;
   }
 
   .boot-bus {
@@ -7918,13 +7917,13 @@ body.map-fullscreen .tab-nav-mobile {
   }
 
   @keyframes bootTram {
-    0% { left: -250px; }
-    100% { left: calc(100% + 40px); }
+    0% { right: -250px; }
+    100% { right: calc(100% + 40px); }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .boot-tram { animation: none; left: 8%; }
-  .boot-bus { animation: none; right: 8%; }
+  .boot-tram { animation: none; right: 8%; }
+  .boot-bus { animation: none; left: 8%; }
   .boot-tram-img, .boot-bus-img, .boot-dots i, .boot-spark { animation: none; }
 }
