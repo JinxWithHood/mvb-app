@@ -7962,32 +7962,15 @@ body.map-fullscreen .tab-nav-mobile {
   display: none;
 }
 
-/* far out: small white dots */
-.hst-dots .hst-h {
-  width: 9px;
-  height: 9px;
-  background: #fff;
-  border: 2px solid #1f2937;
-  font-size: 0;
-}
-
-/* closer: the yellow H sign */
-.hst-sign .hst-h,
-.hst-full .hst-h {
-  width: 17px;
-  height: 17px;
-  background: #ffd400;
-  color: #0a7a3c;
-  border: 1.6px solid #0a7a3c;
-  font-size: 10.5px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-}
-
-/* close up: H sign on a pole with the line plate */
+/* close up: yellow H sign on a little pole */
 .hst-full .hst-h {
   width: 20px;
   height: 20px;
+  background: #ffd400;
+  color: #0a7a3c;
+  border: 1.6px solid #0a7a3c;
   font-size: 12.5px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, calc(-100% - 11px));
 }
 
@@ -8013,58 +7996,71 @@ body.map-fullscreen .tab-nav-mobile {
   background: rgba(0, 0, 0, 0.25);
 }
 
-.hst-full .hst-plate {
+.hst-full .hst-h:hover {
+  filter: brightness(1.05);
+  transform: translate(-50%, calc(-100% - 11px)) scale(1.12);
+}
+
+/* popup with the lines (on tap) */
+.hst-pop {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  position: absolute;
-  left: 12px;
-  top: -33px;
-  padding: 2px 3px;
-  border-radius: 4px;
-  background: #ffffff;
-  border: 1px solid rgba(10, 122, 60, 0.45);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  white-space: nowrap;
-  pointer-events: none;
+  gap: 8px;
+  min-width: 150px;
 }
 
-.hst.no-lines .hst-plate,
-.hst-full .hst.no-lines .hst-plate {
-  display: none;
-}
-
-.hst-name {
-  display: none;
-  font-size: 9.5px;
-  font-weight: 800;
-  color: #0f1a14;
-  padding: 0 1px;
-}
-
-.hst-names .hst-name {
-  display: block;
-}
-
-.hst-names .hst.no-lines .hst-plate {
+.hst-pop-head {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 18px;
 }
 
-.hst-full .hst-plate {
-  width: max-content;
+.hst-pop-head strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
 }
 
-.hst-lines {
+.hst-pop-h {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffd400;
+  color: #0a7a3c;
+  border: 2px solid #0a7a3c;
+  font: 900 13px/1 Arial, Helvetica, sans-serif;
+}
+
+.hst-pop-lines {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
-  max-width: 104px;
+  gap: 4px;
+}
+
+.hst-pop-lines .hst-l {
+  min-width: 26px;
+  height: 22px;
+  font-size: 0.75rem;
+  border-radius: 6px;
+}
+
+.hst-pop-lines .hst-l.bus {
+  border-radius: 11px;
+}
+
+.hst-pop-empty {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
 }
 
 .hst-l {
   min-width: 15px;
   height: 14px;
-  padding: 0 3px;
+  padding: 0 4px;
   border-radius: 3px;
   display: inline-flex;
   align-items: center;
@@ -8079,29 +8075,9 @@ body.map-fullscreen .tab-nav-mobile {
 }
 
 .hst-l.bus {
-  background: #fff;
-  color: #1f2937;
-  box-shadow: inset 0 0 0 1.5px var(--lc);
+  background: var(--card-solid);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 2px var(--lc);
   border-radius: 7px;
 }
 
-.map-shell[data-theme="dark"] .hst-full .hst-plate,
-.map-shell[data-theme="jinx"] .hst-full .hst-plate {
-  background: #1a2023;
-  border-color: rgba(255, 212, 0, 0.45);
-}
-
-.map-shell[data-theme="dark"] .hst-name,
-.map-shell[data-theme="jinx"] .hst-name {
-  color: #e8edf0;
-}
-
-.map-shell[data-theme="dark"] .hst-l.bus,
-.map-shell[data-theme="jinx"] .hst-l.bus {
-  background: #1a2023;
-  color: #e8edf0;
-}
-
-.map-shell[data-theme="dark"] .hst-dots .hst-h {
-  border-color: #0f1416;
-}

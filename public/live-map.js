@@ -358,16 +358,14 @@
             const icon = L.divIcon({
                 className: 'hst-icon',
                 iconSize: [0, 0],
-                html: `<div class="hst${keys.length ? '' : ' no-lines'}"><div class="hst-pole"></div><div class="hst-h">H</div><div class="hst-plate"><span class="hst-name">${escapeHtml(st.name)}</span>${badges ? `<span class="hst-lines">${badges}</span>` : ''}</div></div>`,
+                html: `<div class="hst"><div class="hst-pole"></div><div class="hst-h">H</div></div>`,
             });
             const m = L.marker([st.lat, st.lon], { icon, pane: 'stations', keyboard: false, bubblingMouseEvents: false });
-            m.bindTooltip(() => {
-                const tb = keys.map(k => {
-                    const c = colorForKey(k);
-                    return `<span class="map-line-badge${darkText(c)}" style="background:${c}">${escapeHtml(keyShort(k))}</span>`;
-                }).join('');
-                return `<div class="map-tip"><strong>${escapeHtml(st.name)}</strong>${tb ? `<div class="map-tip-lines">${tb}</div>` : ''}</div>`;
-            }, { direction: 'top', offset: [0, -10], className: 'map-tooltip', opacity: 1 });
+            // lines serving the stop only on tap
+            m.bindPopup(() => `<div class="hst-pop">
+                    <div class="hst-pop-head"><span class="hst-pop-h">H</span><strong>${escapeHtml(st.name)}</strong></div>
+                    ${badges ? `<div class="hst-pop-lines">${badges}</div>` : '<div class="hst-pop-empty">Keine Linien bekannt</div>'}
+                </div>`, { className: 'mv-popup hst-popup', closeButton: true, offset: [0, -34], maxWidth: 260 });
             m.addTo(stationLayer);
         });
         if (wasOn) stationLayer.addTo(map);
@@ -378,12 +376,9 @@
         if (!map || !stationLayer) return;
         const z = map.getZoom();
         const el = map.getContainer();
-        // dots → small H signs → full signs with line badges
-        el.classList.toggle('hst-dots', z < 14);
-        el.classList.toggle('hst-sign', z === 14);
-        el.classList.toggle('hst-full', z >= 15);
-        el.classList.toggle('hst-names', z >= 17);
-        const show = z >= 14 || (z >= 13 && !focus);
+        // stop signs only when zoomed in really close
+        el.classList.toggle('hst-full', z >= 16);
+        const show = z >= 16;
         if (show && !map.hasLayer(stationLayer)) stationLayer.addTo(map);
         if (!show && map.hasLayer(stationLayer)) map.removeLayer(stationLayer);
     }
