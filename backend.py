@@ -242,8 +242,17 @@ except Exception:
     pass
 CORS(app)
 
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024   # API takes tiny JSON bodies only
+
+
 @app.after_request
 def add_header(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), payment=()')
+    if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000')
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
@@ -2440,6 +2449,8 @@ def make_pill_html(line_key):
 def enrich_transit_article_text(raw_text):
     if not raw_text:
         return ''
+    # text comes from a foreign page and ends up as HTML – escape first, then add our own markup
+    raw_text = html.escape(raw_text, quote=False)
     # 1. Spacing fixes for glued words and punctuation
     text = re.sub(r'([a-zäöüß])([A-ZÄÖÜ])', r'\1 \2', raw_text)
     text = re.sub(r'(\.)([A-ZÄÖÜ])', r'\1 \2', text)
@@ -2506,7 +2517,12 @@ def get_news_article():
     if not article_url:
         return jsonify({'error': 'Article URL not found'}), 404
 
-    if 'mvbnet.de' not in article_url:
+    try:
+        _u = urlparse(article_url)
+        _host = (_u.hostname or '').lower()
+    except Exception:
+        _u, _host = None, ''
+    if not _u or _u.scheme not in ('http', 'https') or not (_host == 'mvbnet.de' or _host.endswith('.mvbnet.de')):
         return jsonify({'error': 'Invalid domain'}), 400
 
     now_ts = time.time()
@@ -4070,6 +4086,16 @@ def _clean_prefs(p):
             'lines': lines[:30], 'quiet': quiet}
 
 
+def _clean_reminder(r):
+    try:
+        return {'id': str(r.get('id') or uuid.uuid4().hex[:10])[:20], 'jid': str(r['jid'])[:300],
+                'line': str(r.get('line', ''))[:20], 'direction': str(r.get('direction', ''))[:80],
+                'station': str(r.get('station', ''))[:80], 'planned': int(r.get('planned') or 0),
+                'lead': max(1, min(30, int(r.get('lead', 5)))), 'delay': int(r.get('delay') or 0)}
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
 @app.route('/api/push/key')
 def push_key():
     if not PUSH_AVAILABLE:
@@ -4083,16 +4109,23 @@ def push_subscribe():
         return jsonify({'error': 'Push nicht verfügbar'}), 503
     data = request.get_json(silent=True) or {}
     sub = data.get('subscription') or {}
-    if not sub.get('endpoint') or not (sub.get('keys') or {}).get('p256dh'):
+    if not isinstance(sub, dict) or not str(sub.get('endpoint', '')).startswith('https://') \
+            or len(str(sub.get('endpoint'))) > 1000 or not isinstance(sub.get('keys'), dict) \
+            or not sub['keys'].get('p256dh') or not sub['keys'].get('auth'):
         return jsonify({'error': 'Ungültiges Abo'}), 400
     key = _sub_key(sub['endpoint'])
     with _push_lock:
+        if key not in _subs() and len(_subs()) >= 500:
+            return jsonify({'error': 'Zu viele Geräte registriert'}), 503
         entry = _subs().get(key) or {'created': int(time.time()), 'reminders': []}
-        entry.update({'endpoint': sub['endpoint'], 'keys': sub['keys'], 'prefs': _clean_prefs(data.get('prefs')),
+        entry.update({'endpoint': sub['endpoint'],
+                      'keys': {'p256dh': str(sub['keys']['p256dh'])[:200], 'auth': str(sub['keys']['auth'])[:100]}, 'prefs': _clean_prefs(data.get('prefs')),
                       'seen': int(time.time()), 'ua': (request.headers.get('User-Agent') or '')[:120]})
         # reminders the device still knows about (e.g. after a server restart)
         if data.get('reminders') and not entry.get('reminders'):
-            entry['reminders'] = [r for r in data['reminders'] if isinstance(r, dict) and r.get('jid')][:20]
+            entry['reminders'] = [_clean_reminder(r) for r in data['reminders'][:20]
+                                  if isinstance(r, dict) and r.get('jid')]
+            entry['reminders'] = [r for r in entry['reminders'] if r]
         _subs()[key] = entry
         _save_json_file(PUSH_SUBS_FILE, _subs())
     return jsonify({'ok': True, 'reminders': entry.get('reminders', [])})
@@ -4135,12 +4168,9 @@ def push_remind():
             return jsonify({'ok': True, 'reminders': sub['reminders']})
         if not data.get('jid') or not data.get('planned'):
             return jsonify({'error': 'Fahrt fehlt'}), 400
-        rem = {
-            'id': data.get('id') or uuid.uuid4().hex[:10],
-            'jid': data['jid'], 'line': str(data.get('line', ''))[:20], 'direction': str(data.get('direction', ''))[:80],
-            'station': str(data.get('station', ''))[:80], 'planned': int(data['planned']),
-            'lead': max(1, min(30, int(data.get('lead', 5)))), 'delay': int(data.get('delay') or 0),
-        }
+        rem = _clean_reminder(data)
+        if not rem:
+            return jsonify({'error': 'Ungültige Fahrt'}), 400
         sub['reminders'] = [r for r in rems if r.get('id') != rem['id']][-19:] + [rem]
         _save_json_file(PUSH_SUBS_FILE, _subs())
     _ensure_push_watcher()
