@@ -7723,7 +7723,7 @@ body.map-fullscreen .tab-nav-mobile {
   position: absolute;
   left: 0;
   right: 0;
-  top: 3px;
+  top: 9px;
   height: 1.5px;
   background: rgba(220, 240, 230, 0.45);
 }
@@ -7761,55 +7761,73 @@ body.map-fullscreen .tab-nav-mobile {
   border-top: 1px solid rgba(220, 240, 230, 0.25);
 }
 
-/* the Flexity glides in from the left, the bus comes from the right */
+/* the tram glides in from the left, the bus comes from the right (mirrored, so it faces forward) */
 .boot-tram {
   position: absolute;
-  bottom: 4px;
-  left: -330px;
-  width: 320px;
-  height: 70px;
-  overflow: visible;
+  bottom: 5px;
+  left: -320px;
+  width: 300px;
   animation: bootTram 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.15s infinite;
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.boot-tram-img,
+.boot-bus-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.4));
+  animation: bootSway 0.9s ease-in-out infinite;
 }
 
 .boot-bus {
   position: absolute;
-  bottom: 6px;
-  right: -180px;
-  width: 170px;
-  height: 66px;
-  overflow: visible;
+  bottom: 7px;
+  right: -170px;
+  width: 150px;
   animation: bootBus 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.55s infinite;
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
 }
 
-.bt-sway,
-.bb-sway {
-  animation: bootSway 0.9s ease-in-out infinite;
-}
-
-.bb-sway {
+.boot-bus-img {
+  transform: scaleX(-1);
+  animation-name: bootSwayMirror;
   animation-duration: 0.7s;
 }
 
-.bt-beam,
-.bb-beam {
+/* headlight cone in front of the vehicle */
+.boot-beam {
+  position: absolute;
+  bottom: 10%;
+  width: 70px;
+  height: 26px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 0 50%, rgba(255, 246, 200, 0.85), rgba(255, 246, 200, 0) 70%);
   animation: bootBeam 1.6s ease-in-out infinite;
 }
 
-.bt-panto {
-  transform-origin: 160px 18px;
-  animation: bootPanto 0.9s ease-in-out infinite;
+.boot-tram .boot-beam {
+  left: 100%;
+  margin-left: -4px;
 }
 
-.bb-wheel > * {
-  transform-box: fill-box;
-  transform-origin: center;
+.boot-bus .boot-beam {
+  right: 100%;
+  margin-right: -4px;
+  bottom: 16%;
+  transform: scaleX(-1);
 }
 
-.bb-wheel path {
-  animation: bootSpin 0.5s linear infinite reverse;
+/* little spark where the pantograph touches the wire */
+.boot-spark {
+  position: absolute;
+  left: 45.6%;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0 25%, #9fdcff 45%, rgba(120, 200, 255, 0) 70%);
+  opacity: 0;
+  animation: bootSpark 1.7s steps(1, end) 0.4s infinite;
 }
 
 .boot-dots {
@@ -7845,9 +7863,17 @@ body.map-fullscreen .tab-nav-mobile {
   50% { transform: translateY(-0.8px); }
 }
 
-@keyframes bootPanto {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(0.94); }
+@keyframes bootSwayMirror {
+  0%, 100% { transform: scaleX(-1) translateY(0); }
+  50% { transform: scaleX(-1) translateY(-0.8px); }
+}
+
+@keyframes bootSpark {
+  0%, 100% { opacity: 0; }
+  12% { opacity: 1; }
+  18% { opacity: 0; }
+  52% { opacity: 0.8; }
+  56% { opacity: 0; }
 }
 
 @keyframes bootBeam {
@@ -7879,14 +7905,12 @@ body.map-fullscreen .tab-nav-mobile {
   }
 
   .boot-tram {
-    width: 240px;
-    height: 52px;
+    width: 230px;
     left: -250px;
   }
 
   .boot-bus {
-    width: 128px;
-    height: 50px;
+    width: 122px;
   }
 
   .boot-lane-tram {
@@ -7902,5 +7926,5 @@ body.map-fullscreen .tab-nav-mobile {
 @media (prefers-reduced-motion: reduce) {
   .boot-tram { animation: none; left: 8%; }
   .boot-bus { animation: none; right: 8%; }
-  .bt-sway, .bb-sway, .bb-wheel path, .boot-dots i, .bt-panto { animation: none; }
+  .boot-tram-img, .boot-bus-img, .boot-dots i, .boot-spark { animation: none; }
 }
