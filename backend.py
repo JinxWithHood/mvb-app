@@ -2843,13 +2843,19 @@ def _point_along(poly, cum, frac):
     return poly[-1]
 
 
-def _classify_radar_product(prod):
+def _classify_radar_product(prod, operator=''):
     name = (prod.get('name') or '').strip()
     low = name.lower()
-    cat = ((prod.get('prodCtx') or {}).get('catOut') or (prod.get('prodCtx') or {}).get('catOutS') or '').lower()
-    if low.startswith('str') or 'tram' in low or cat in ('str', 'tram'):
+    ctx = prod.get('prodCtx') or {}
+    cat = (ctx.get('catOut') or ctx.get('catOutS') or '').strip().lower()
+    op = (operator or '').lower()
+    cls = prod.get('cls')
+    # long-distance coaches (FlixBus & co.) – never a tram, even with line numbers like "N300"
+    if 'flix' in op or 'flix' in low or cat in ('flx', 'fernbus', 'fb') or 'fernbus' in cat:
+        return 'fernbus'
+    if low.startswith('str') or low.startswith('tram') or cat in ('str', 'tram') or cls == 32:
         return 'tram'
-    if low.startswith('bus') or cat.startswith('bus'):
+    if low.startswith('bus') or low.startswith('ruf') or cat.startswith('bus') or cls == 64:
         return 'bus'
     if low.startswith('s') and re.match(r'^s\s*\d', low):
         return 'sbahn'
@@ -2857,7 +2863,9 @@ def _classify_radar_product(prod):
         return 'regional'
     if any(low.startswith(k) for k in ('ice', 'ic', 'ec')):
         return 'express'
-    return classify_line_type(name, operator_name=None)
+    guess = classify_line_type(name, operator_name=operator or None)
+    # without an explicit tram marker we don't trust a "tram" guess (e.g. coach line "N881")
+    return 'bus' if guess == 'tram' else guess
 
 
 _radar_cache = {'ts': 0, 'data': None}
@@ -2932,7 +2940,10 @@ def get_radar():
             name = (prod.get('name') or prod.get('nameS') or '').strip()
             if not name:
                 continue
-            vtype = _classify_radar_product(prod)
+            op_l = common.get('opL') or []
+            op_x = prod.get('oprX')
+            operator = (op_l[op_x].get('name') or '') if isinstance(op_x, int) and op_x < len(op_l) else ''
+            vtype = _classify_radar_product(prod, operator)
             short = (prod.get('nameS') or (prod.get('prodCtx') or {}).get('line') or re.sub(r'^(Str|Bus|Tram)\s*', '', name)).strip()
             pos = jny.get('pos') or {}
             if 'x' not in pos or 'y' not in pos:
@@ -3066,6 +3077,8 @@ def get_radar():
                 color = '#00975F'
             elif vtype in ('regional', 'express'):
                 color = '#E30513'
+            elif vtype == 'fernbus':
+                color = '#5f9e1f'
 
             vehicles.append({
                 'id': jny.get('jid'),

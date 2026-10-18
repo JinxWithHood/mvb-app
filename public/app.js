@@ -703,7 +703,28 @@ document.addEventListener('DOMContentLoaded', () => {
         ariaLiveRegion.textContent = msg;
     }
 
+    // Let the Flexity & bus intro play once per session (and every time the installed app starts)
+    const BOOT_MIN_MS = (() => {
+        try {
+            const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 600;
+            if (standalone || !sessionStorage.getItem('mvb_boot_seen')) {
+                sessionStorage.setItem('mvb_boot_seen', '1');
+                return 2600;
+            }
+        } catch (e) { /* ignore */ }
+        return 900;
+    })();
+    let bootHideRequested = false;
+
     function hideLoadingScreen() {
+        if (bootHideRequested) return;
+        const wait = BOOT_MIN_MS - performance.now();
+        if (wait > 0) {
+            bootHideRequested = true;
+            setTimeout(() => { bootHideRequested = false; hideLoadingScreen(); }, wait);
+            return;
+        }
         const loadingScreen = document.getElementById('app-loading-screen');
         if (loadingScreen) {
             if (loadingStatusInterval) {

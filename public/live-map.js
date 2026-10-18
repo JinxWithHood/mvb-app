@@ -121,13 +121,13 @@
 
     function vehicleGroup(type) {
         if (type === 'tram') return 'tram';
-        if (type === 'bus' || type === 'sev') return 'bus';
+        if (type === 'bus' || type === 'sev' || type === 'fernbus') return 'bus';
         return 'train';
     }
 
     function lineKeyOf(v) {
         const g = vehicleGroup(v.type);
-        if (g === 'train') return null;
+        if (g === 'train' || v.type === 'fernbus') return null; // coaches: no local line route
         return `${g}:${v.short || v.line}`;
     }
 
@@ -1248,7 +1248,7 @@
         const color = v ? v.color : '#64748b';
         const head = `<div class="mf-head">
             <span class="mf-badge${darkText(color)}" style="background:${color}">${escapeHtml(v ? (v.short || v.line) : '?')}</span>
-            <div class="mf-title"><small>${v ? (vehicleGroup(v.type) === 'bus' ? 'Bus' : 'Straßenbahn') + ' · Richtung' : 'Fahrt'}</small><strong>${escapeHtml(v ? v.direction : '')}</strong></div>
+            <div class="mf-title"><small>${v ? (v.type === 'fernbus' ? 'Fernbus' : vehicleGroup(v.type) === 'bus' ? 'Bus' : vehicleGroup(v.type) === 'tram' ? 'Straßenbahn' : 'Zug') + ' · Richtung' : 'Fahrt'}</small><strong>${escapeHtml(v ? v.direction : '')}</strong></div>
             ${closeBtn}</div>`;
         if (!v) return head + '<p class="mf-empty">Dieses Fahrzeug hat die Fahrt beendet.</p>';
         if (focus.loading) return head + '<div class="mf-loading"><span class="mf-spin"></span>Linienweg wird geladen…</div>';

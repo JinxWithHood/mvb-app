@@ -7660,3 +7660,247 @@ body.map-fullscreen .tab-nav-mobile {
   flex: 1 1 0;
   line-height: 1.35;
 }
+
+/* ============================================================
+   30. STARTUP – Flexity & Bus
+   ============================================================ */
+.loading-overlay .loading-container {
+  max-width: 600px;
+  width: 100%;
+}
+
+.boot-scene {
+  position: relative;
+  width: min(600px, 100vw);
+  height: 170px;
+  margin: -6px 0 18px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+}
+
+.boot-skyline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 74px;
+  width: 100%;
+  height: 90px;
+  color: rgba(0, 0, 0, 0.28);
+  animation: bootFadeUp 0.9s ease-out both;
+}
+
+.boot-stars circle {
+  animation: bootTwinkle 2.4s ease-in-out infinite;
+}
+
+.boot-stars circle:nth-child(2n) {
+  animation-delay: 0.8s;
+}
+
+.boot-stars circle:nth-child(3n) {
+  animation-delay: 1.5s;
+}
+
+.boot-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.boot-lane-tram {
+  bottom: 58px;
+  height: 76px;
+}
+
+.boot-lane-bus {
+  bottom: 0;
+  height: 58px;
+}
+
+/* overhead wire with masts */
+.boot-wire {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1.5px;
+  background: rgba(220, 240, 230, 0.45);
+}
+
+.boot-wire::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 80px;
+  background: repeating-linear-gradient(90deg, rgba(220, 240, 230, 0.22) 0 2px, transparent 2px 150px);
+  -webkit-mask-image: linear-gradient(#000, #000);
+}
+
+.boot-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  border-top: 2px solid rgba(220, 240, 230, 0.6);
+  background: repeating-linear-gradient(90deg, rgba(220, 240, 230, 0.35) 0 4px, transparent 4px 13px);
+}
+
+.boot-road {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 9px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.7) 0 18px, transparent 18px 36px) center / 100% 2px no-repeat,
+    #1a2620;
+  border-top: 1px solid rgba(220, 240, 230, 0.25);
+}
+
+/* the Flexity glides in from the left, the bus comes from the right */
+.boot-tram {
+  position: absolute;
+  bottom: 4px;
+  left: -330px;
+  width: 320px;
+  height: 70px;
+  overflow: visible;
+  animation: bootTram 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.15s infinite;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.boot-bus {
+  position: absolute;
+  bottom: 6px;
+  right: -180px;
+  width: 170px;
+  height: 66px;
+  overflow: visible;
+  animation: bootBus 3.4s cubic-bezier(0.42, 0, 0.3, 1) 0.55s infinite;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.bt-sway,
+.bb-sway {
+  animation: bootSway 0.9s ease-in-out infinite;
+}
+
+.bb-sway {
+  animation-duration: 0.7s;
+}
+
+.bt-beam,
+.bb-beam {
+  animation: bootBeam 1.6s ease-in-out infinite;
+}
+
+.bt-panto {
+  transform-origin: 160px 18px;
+  animation: bootPanto 0.9s ease-in-out infinite;
+}
+
+.bb-wheel > * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.bb-wheel path {
+  animation: bootSpin 0.5s linear infinite reverse;
+}
+
+.boot-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 2px 0 10px;
+}
+
+.boot-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7fc600;
+  animation: bootDot 1s ease-in-out infinite;
+}
+
+.boot-dots i:nth-child(2) { animation-delay: 0.15s; }
+.boot-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes bootTram {
+  0% { left: -330px; }
+  100% { left: calc(100% + 40px); }
+}
+
+@keyframes bootBus {
+  0% { right: -180px; }
+  100% { right: calc(100% + 60px); }
+}
+
+@keyframes bootSway {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-0.8px); }
+}
+
+@keyframes bootPanto {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.94); }
+}
+
+@keyframes bootBeam {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+@keyframes bootSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bootDot {
+  0%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+
+@keyframes bootTwinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes bootFadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+}
+
+@media (max-width: 480px) {
+  .boot-scene {
+    height: 150px;
+  }
+
+  .boot-tram {
+    width: 240px;
+    height: 52px;
+    left: -250px;
+  }
+
+  .boot-bus {
+    width: 128px;
+    height: 50px;
+  }
+
+  .boot-lane-tram {
+    height: 62px;
+  }
+
+  @keyframes bootTram {
+    0% { left: -250px; }
+    100% { left: calc(100% + 40px); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-tram { animation: none; left: 8%; }
+  .boot-bus { animation: none; right: 8%; }
+  .bt-sway, .bb-sway, .bb-wheel path, .boot-dots i, .bt-panto { animation: none; }
+}
