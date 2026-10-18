@@ -8244,3 +8244,411 @@ body.map-fullscreen .tab-nav-mobile {
 .map-delaymode .mv-bus.dc-dark .mv-body::before {
   background: rgba(0, 0, 0, 0.55);
 }
+
+/* ===========================================================
+   33. Saison-Skins (season.js setzt .skin-<name> auf .map-shell)
+   Form (4 Wagen / 2 Teile) und Linienfarbe am Schild bleiben immer.
+   Im Pünktlichkeitsmodus ist die Deko aus.
+   =========================================================== */
+.map-season-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 450;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.map-shell.map-delaymode .map-season-fx { display: none; }
+
+.map-season-banner {
+  position: absolute;
+  left: 50%;
+  top: 64px;
+  z-index: 520;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--card-solid);
+  color: var(--text-primary);
+  font: 800 15px/1.2 var(--font-family);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  white-space: nowrap;
+  animation: seasonBannerIn 0.5s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+
+.map-season-banner.big {
+  top: 38%;
+  padding: 10px 30px;
+  font-size: 64px;
+  background: rgba(10, 8, 30, 0.75);
+  color: #fcd34d;
+  border: 2px solid #fcd34d;
+}
+
+.map-season-banner[hidden] { display: none; }
+
+@keyframes seasonBannerIn {
+  from { opacity: 0; transform: translate(-50%, -12px) scale(.9); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+.map-season-btn.active { color: #f59e0b; }
+.map-season-btn .ico { fill: currentColor; stroke: none; }
+.map-season-btn[hidden] { display: none; }
+
+/* ---------- Ostern ---------- */
+.map-shell.skin-ostern:not(.map-delaymode) .mv-tram .mv-body {
+  background:
+    radial-gradient(rgba(255, 255, 255, 0.8) 0.9px, transparent 1.3px) 0 0 / 4px 4px,
+    linear-gradient(90deg,
+      #f472b6 0 23.5%, #fff 23.5% 26.5%,
+      #34d399 26.5% 48.5%, #fff 48.5% 51.5%,
+      #60a5fa 51.5% 73.5%, #fff 73.5% 76.5%,
+      #fbbf24 76.5% 100%);
+}
+
+.map-shell.skin-ostern:not(.map-delaymode) .mv-bus .mv-body {
+  background:
+    radial-gradient(rgba(255, 255, 255, 0.8) 0.9px, transparent 1.3px) 0 0 / 4px 4px,
+    linear-gradient(90deg, #a78bfa 0 47%, #fff 47% 53%, #34d399 53% 100%);
+}
+
+/* Hasenohren */
+.map-shell.skin-ostern:not(.map-delaymode) .mv:not(.mv-train) .mv-label::before,
+.map-shell.skin-ostern:not(.map-delaymode) .mv:not(.mv-train) .mv-label::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  width: 5px;
+  height: 10px;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(#fff 0 25%, #fbcfe0 25% 80%, #fff 80%);
+  border: 1px solid #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.map-shell.skin-ostern:not(.map-delaymode) .mv:not(.mv-train) .mv-label::before { left: 2px; transform: rotate(-16deg); }
+.map-shell.skin-ostern:not(.map-delaymode) .mv:not(.mv-train) .mv-label::after { right: 2px; transform: rotate(16deg); }
+
+.fx-ostern {
+  background: radial-gradient(ellipse at 50% 120%, rgba(244, 114, 182, 0.12), transparent 60%);
+}
+
+/* ---------- Halloween ---------- */
+.map-shell.skin-halloween:not(.map-delaymode) .mv-tram .mv-body {
+  border-color: #2a1406;
+  background:
+    linear-gradient(90deg, transparent 0 23.5%, #2a1406 23.5% 26.5%, transparent 26.5% 48.5%, #2a1406 48.5% 51.5%, transparent 51.5% 73.5%, #2a1406 73.5% 76.5%, transparent 76.5%),
+    repeating-linear-gradient(90deg, #f97316 0 3px, #ea580c 3px 4px);
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.8), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Kürbisgesicht am vorderen Wagen */
+.map-shell.skin-halloween:not(.map-delaymode) .mv-tram .mv-body::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translateY(-50%);
+  background:
+    radial-gradient(circle at 28% 32%, #fde047 1.3px, transparent 1.7px),
+    radial-gradient(circle at 72% 32%, #fde047 1.3px, transparent 1.7px),
+    linear-gradient(#fde047, #fde047) 50% 78% / 70% 1.6px no-repeat;
+}
+
+.map-shell.skin-halloween:not(.map-delaymode) .mv-bus .mv-body {
+  border-color: #a3e635;
+  background:
+    linear-gradient(90deg, transparent 0 47%, #a3e635 47% 53%, transparent 53%),
+    radial-gradient(#a3e635 1.4px, transparent 1.9px) 2px 50% / 6px 100% repeat-x,
+    #3b0764;
+  box-shadow: 0 0 10px rgba(163, 230, 53, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.map-shell.skin-halloween:not(.map-delaymode) .mv-bus .mv-body::before {
+  background: #a3e635;
+}
+
+/* Gespenst im Schlepptau */
+.map-shell.skin-halloween:not(.map-delaymode) .mv-bus .mv-body::after {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 50%;
+  width: 10px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 6px 6px 2px 2px;
+  background:
+    radial-gradient(circle at 32% 38%, #1c1410 1.1px, transparent 1.5px),
+    radial-gradient(circle at 68% 38%, #1c1410 1.1px, transparent 1.5px),
+    #f5f3ff;
+  opacity: 0.85;
+  animation: ghostFloat 1.6s ease-in-out infinite;
+}
+
+@keyframes ghostFloat {
+  0%, 100% { transform: translateY(-1.5px); }
+  50% { transform: translateY(1.5px); }
+}
+
+.map-shell.skin-halloween:not(.map-delaymode) .mv-tram .mv-label { border-color: #fb923c; box-shadow: 0 0 8px rgba(251, 146, 60, 0.7); }
+.map-shell.skin-halloween:not(.map-delaymode) .mv-bus .mv-label { border-color: #a3e635; box-shadow: 0 0 8px rgba(163, 230, 53, 0.6); }
+
+/* Fledermaus auf den Bahn-Schildern */
+.map-shell.skin-halloween:not(.map-delaymode) .mv-tram .mv-label::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  width: 16px;
+  height: 7px;
+  margin-left: -8px;
+  background: #140b06;
+  clip-path: polygon(0 35%, 18% 0, 32% 40%, 50% 15%, 68% 40%, 82% 0, 100% 35%, 76% 100%, 50% 72%, 24% 100%);
+}
+
+.fx-halloween {
+  background:
+    radial-gradient(ellipse 45% 30% at 20% 80%, rgba(200, 190, 220, 0.16), transparent 70%),
+    radial-gradient(ellipse 40% 25% at 80% 25%, rgba(200, 190, 220, 0.12), transparent 70%),
+    radial-gradient(ellipse at center, transparent 55%, rgba(30, 10, 0, 0.35));
+  background-size: 200% 100%, 200% 100%, 100% 100%;
+  animation: fogDrift 24s linear infinite alternate;
+}
+
+@keyframes fogDrift {
+  from { background-position: 0 0, 100% 0, 0 0; }
+  to { background-position: 100% 0, 0 0, 0 0; }
+}
+
+/* ---------- Weihnachten ---------- */
+.map-shell.skin-weihnachten:not(.map-delaymode) .mv-tram .mv-body {
+  background:
+    linear-gradient(#fff 0 3.5px, transparent 3.5px),
+    linear-gradient(90deg,
+      var(--body) 0 23.5%, rgba(255, 255, 255, 0.95) 23.5% 26.5%,
+      var(--body) 26.5% 48.5%, rgba(255, 255, 255, 0.95) 48.5% 51.5%,
+      var(--body) 51.5% 73.5%, rgba(255, 255, 255, 0.95) 73.5% 76.5%,
+      var(--body) 76.5% 100%);
+}
+
+/* Lichterkette */
+.map-shell.skin-weihnachten:not(.map-delaymode) .mv-tram .mv-body::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: -6px;
+  height: 4px;
+  background:
+    radial-gradient(circle, #ef4444 1.5px, transparent 2px) 0 0 / 16px 4px repeat-x,
+    radial-gradient(circle, #facc15 1.5px, transparent 2px) 4px 0 / 16px 4px repeat-x,
+    radial-gradient(circle, #22c55e 1.5px, transparent 2px) 8px 0 / 16px 4px repeat-x,
+    radial-gradient(circle, #3b82f6 1.5px, transparent 2px) 12px 0 / 16px 4px repeat-x;
+  animation: twinkle 1.2s steps(2) infinite;
+}
+
+@keyframes twinkle {
+  0% { filter: brightness(1.25) drop-shadow(0 0 2px rgba(255, 255, 255, 0.8)); }
+  100% { filter: brightness(0.75); }
+}
+
+/* Tannengirlande am Bus */
+.map-shell.skin-weihnachten:not(.map-delaymode) .mv-bus .mv-body {
+  background:
+    radial-gradient(circle at 50% 0, #15803d 3px, transparent 3.4px) 0 0 / 6px 4px repeat-x,
+    linear-gradient(90deg, var(--body) 0 47%, rgba(255, 255, 255, 0.95) 47% 53%, var(--body) 53% 100%);
+}
+
+/* Weihnachtsmütze */
+.map-shell.skin-weihnachten:not(.map-delaymode) .mv:not(.mv-train) .mv-label::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: -9px;
+  width: 15px;
+  height: 11px;
+  background: linear-gradient(transparent 0 68%, #fff 68%), #dc2626;
+  clip-path: polygon(0 100%, 58% 0, 100% 100%);
+  transform: rotate(-20deg);
+}
+
+.map-shell.skin-weihnachten:not(.map-delaymode) .mv:not(.mv-train) .mv-label::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: -12px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.fx-weihnachten {
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.95) 1.6px, transparent 2px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.8) 1.1px, transparent 1.5px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.6) 0.8px, transparent 1.2px);
+  background-size: 90px 90px, 60px 60px, 40px 40px;
+  background-position: 0 0, 20px 30px, 10px 15px;
+  filter: drop-shadow(0 0 1px rgba(80, 100, 130, 0.6));
+  animation: snowFall 14s linear infinite;
+}
+
+@keyframes snowFall {
+  from { background-position: 0 0, 20px 30px, 10px 15px; }
+  to { background-position: 30px 360px, 0 270px, 30px 160px; }
+}
+
+/* ---------- Silvester ---------- */
+.map-shell.skin-silvester:not(.map-delaymode) .mv-tram .mv-body {
+  border-color: #fcd34d;
+  background:
+    radial-gradient(#fcd34d 0.9px, transparent 1.2px) 0 0 / 4px 4px,
+    linear-gradient(90deg, transparent 0 23.5%, #fcd34d 23.5% 26.5%, transparent 26.5% 48.5%, #fcd34d 48.5% 51.5%, transparent 51.5% 73.5%, #fcd34d 73.5% 76.5%, transparent 76.5%),
+    #1a1830;
+  box-shadow: 0 0 10px rgba(252, 211, 77, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Wunderkerzen-Schweif */
+.map-shell.skin-silvester:not(.map-delaymode) .mv-tram .mv-body::after {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 13px;
+  height: 9px;
+  margin-top: -4.5px;
+  background:
+    radial-gradient(circle, #fff 0.9px, transparent 1.3px) 0 0 / 4px 4px,
+    radial-gradient(circle, #fcd34d 1.1px, transparent 1.5px) 2px 2px / 4px 4px;
+  -webkit-mask: linear-gradient(90deg, transparent, #000);
+  mask: linear-gradient(90deg, transparent, #000);
+  animation: sparkle 0.25s steps(2) infinite;
+}
+
+@keyframes sparkle {
+  0% { background-position: 0 0, 2px 2px; }
+  100% { background-position: 2px 1px, 0 3px; }
+}
+
+.map-shell.skin-silvester:not(.map-delaymode) .mv-bus .mv-body {
+  border-color: #fcd34d;
+  background:
+    radial-gradient(circle at 20% 30%, #f472b6 1.2px, transparent 1.5px),
+    radial-gradient(circle at 40% 70%, #60a5fa 1.2px, transparent 1.5px),
+    radial-gradient(circle at 65% 30%, #4ade80 1.2px, transparent 1.5px),
+    radial-gradient(circle at 80% 72%, #fcd34d 1.2px, transparent 1.5px),
+    linear-gradient(90deg, transparent 0 47%, #fcd34d 47% 53%, transparent 53%),
+    #1e1b4b;
+  box-shadow: 0 0 10px rgba(252, 211, 77, 0.5), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.map-shell.skin-silvester:not(.map-delaymode) .mv-bus .mv-body::before { background: #fcd34d; }
+
+.map-shell.skin-silvester:not(.map-delaymode) .mv-label {
+  border-color: #fcd34d;
+  box-shadow: 0 0 8px rgba(252, 211, 77, 0.7);
+}
+
+.map-shell.skin-midnight:not(.map-delaymode) .mv-body {
+  animation: goldFlash 0.6s ease-in-out 6 alternate;
+}
+
+@keyframes goldFlash {
+  from { filter: none; }
+  to { filter: brightness(1.8) drop-shadow(0 0 8px #fcd34d); }
+}
+
+.fx-silvester .fw {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow:
+    0 -34px 0 0 var(--c), 24px -24px 0 0 var(--c), 34px 0 0 0 var(--c), 24px 24px 0 0 var(--c),
+    0 34px 0 0 var(--c), -24px 24px 0 0 var(--c), -34px 0 0 0 var(--c), -24px -24px 0 0 var(--c),
+    0 -18px 0 -1px #fff, 18px 0 0 -1px #fff, 0 18px 0 -1px #fff, -18px 0 0 -1px #fff;
+  animation: fwBurst 1.5s ease-out forwards;
+}
+
+@keyframes fwBurst {
+  0% { transform: scale(0.1); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* ---------- Geburtstag (13.2. / 26.2.) ---------- */
+.map-shell.skin-geburtstag:not(.map-delaymode) .mv-tram .mv-body {
+  background:
+    radial-gradient(rgba(255, 255, 255, 0.85) 0.9px, transparent 1.3px) 0 0 / 5px 4px,
+    linear-gradient(90deg,
+      #f43f5e 0 23.5%, #fff 23.5% 26.5%,
+      #f59e0b 26.5% 48.5%, #fff 48.5% 51.5%,
+      #10b981 51.5% 73.5%, #fff 73.5% 76.5%,
+      #6366f1 76.5% 100%);
+}
+
+.map-shell.skin-geburtstag:not(.map-delaymode) .mv-bus .mv-body {
+  background:
+    radial-gradient(rgba(255, 255, 255, 0.85) 0.9px, transparent 1.3px) 0 0 / 5px 4px,
+    linear-gradient(90deg, #ec4899 0 47%, #fff 47% 53%, #06b6d4 53% 100%);
+}
+
+/* Partyhut */
+.map-shell.skin-geburtstag:not(.map-delaymode) .mv:not(.mv-train) .mv-label::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  width: 11px;
+  height: 12px;
+  margin-left: -5.5px;
+  background: repeating-linear-gradient(45deg, #f59e0b 0 2px, #ec4899 2px 4px);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.map-shell.skin-geburtstag:not(.map-delaymode) .mv:not(.mv-train) .mv-label::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -14px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: #facc15;
+}
+
+.fx-geburtstag {
+  background-image:
+    radial-gradient(circle, #f43f5e 2px, transparent 2.5px),
+    radial-gradient(circle, #f59e0b 1.8px, transparent 2.3px),
+    radial-gradient(circle, #10b981 2px, transparent 2.5px),
+    radial-gradient(circle, #6366f1 1.6px, transparent 2.1px),
+    radial-gradient(circle, #06b6d4 1.8px, transparent 2.3px);
+  background-size: 110px 120px, 90px 100px, 130px 140px, 70px 90px, 150px 110px;
+  background-position: 0 0, 40px 20px, 80px 60px, 20px 50px, 60px 10px;
+  opacity: 0.85;
+  animation: confettiFall 16s linear infinite;
+}
+
+@keyframes confettiFall {
+  from { background-position: 0 0, 40px 20px, 80px 60px, 20px 50px, 60px 10px; }
+  to { background-position: 40px 480px, 0 420px, 120px 560px, 50px 360px, 20px 450px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-season-fx,
+  .map-season-fx *,
+  .map-shell[class*="skin-"] .mv-body::after,
+  .map-shell.skin-midnight .mv-body {
+    animation: none !important;
+  }
+}
