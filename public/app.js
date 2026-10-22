@@ -40,8 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 scrollToResults();
             } else if (target === 'connections') {
                 setTimeout(() => {
-                    const originInput = document.getElementById('originInput');
-                    if (originInput) originInput.focus();
+                    const di = document.getElementById('destInput');
+                    if (di) di.focus();
                 }, 100);
             }
         });
@@ -132,9 +132,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // State Management
     // -----------------------------------------------------------------------
-    let currentStation = { id: '7393', name: 'Magdeburg, Hauptbahnhof/Willy-Brandt-Platz' };
-    let originStation = null;
-    let destStation = null;
+    const savedSettings = (() => {
+        try { return JSON.parse(localStorage.getItem('mvb_settings_v1') || '{}') || {}; } catch (e) { return {}; }
+    })();
+    let currentStation = (savedSettings.homeStation && savedSettings.homeStation.id)
+        ? savedSettings.homeStation
+        : { id: '7393', name: 'Magdeburg, Hauptbahnhof/Willy-Brandt-Platz' };
     
     let activeFilters = {
         all: true,
@@ -146,7 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let departuresCache = [];
     let isNowModeActive = true;
-    let isConnNowActive = true;
     let nowInterval = null;
     let silentFetchInterval = null;
     let connectionStopsInterval = null;
@@ -180,7 +182,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Hero section and forms
     const heroSection = document.getElementById('heroSection');
     const formDepartures = document.getElementById('form-departures');
-    const formConnections = document.getElementById('form-connections');
 
     // Departures Form
     const stationInput = document.getElementById('stationInput');
@@ -191,27 +192,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const depDuration = document.getElementById('depDuration');
     const nowBtn = document.getElementById('nowBtn');
     const submitDepBtn = document.getElementById('submitDepBtn');
+    if (stationInput && currentStation) stationInput.value = currentStation.name;
+    if (depDuration && [30, 60, 120, 240].includes(Number(savedSettings.boardDuration))) depDuration.value = String(savedSettings.boardDuration);
 
-    // Connections Form
-    const originInput = document.getElementById('originInput');
-    const originSuggestions = document.getElementById('originSuggestions');
-    const destInput = document.getElementById('destInput');
-    const destSuggestions = document.getElementById('destSuggestions');
     const swapBtn = document.getElementById('swapBtn');
-    const connDate = document.getElementById('connDate');
-    const connTime = document.getElementById('connTime');
-    const connNowBtn = document.getElementById('connNowBtn');
-    const submitConnBtn = document.getElementById('submitConnBtn');
-
-    // Transport toggle buttons
-    const transportBtns = document.querySelectorAll('.transport-pill-btn');
-    const allowedTransport = {
-        tram: true,
-        bus: true,
-        sbahn: true,
-        regional: true,
-        express: true
-    };
+    const destInput = document.getElementById('destInput');
 
     // Quick Action Bar
     const actionButtons = document.querySelectorAll('.quick-action-bar .action-btn');
@@ -226,10 +211,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const departuresLoading = document.getElementById('departuresLoading');
     const departuresEmpty = document.getElementById('departuresEmpty');
 
-    // Connections Result List
-    const connectionsList = document.getElementById('connectionsList');
-    const connectionsLoading = document.getElementById('connectionsLoading');
-    const connectionsEmpty = document.getElementById('connectionsEmpty');
 
     // Alerts & Traffic Hub Result List
     const alertsList = document.getElementById('alertsList');
@@ -664,10 +645,6 @@ document.addEventListener('DOMContentLoaded', () => {
             depDate.value = dateStr;
             depTime.value = timeStr;
         }
-        if (isConnNowActive) {
-            connDate.value = dateStr;
-            connTime.value = timeStr;
-        }
     }
 
     function isDesktopLayout() {
@@ -916,9 +893,9 @@ document.addEventListener('DOMContentLoaded', () => {
             sub: 'Live-Abfahrten, Verbindungen und Störungen für Magdeburg — werbefrei und in Echtzeit.'
         }),
         departures: () => ({
-            eyebrow: 'Live-Abfahrtstafel',
-            title: 'Abfahrten',
-            sub: 'Echtzeit-Abfahrten mit Verspätungen, Ausfällen und Live-Position der Fahrzeuge.'
+            eyebrow: 'Fahrplan',
+            title: 'Wohin geht\'s?',
+            sub: 'Nur „Von“ zeigt die Abfahrten. Mit Ziel bekommst du Verbindungen – in Magdeburg und ganz Deutschland, live.'
         }),
         connections: () => ({
             eyebrow: 'Routenplaner',
@@ -951,7 +928,35 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // Synchronized Tab Navigation (Desktop Header Menu + Mobile Bottom Tab Nav)
     // -----------------------------------------------------------------------
+    function setPlanView(view) {
+        const board = document.getElementById('planBoard');
+        const routes = document.getElementById('planRoutes');
+        if (!board || !routes) return;
+        const isRoutes = view === 'routes';
+        board.hidden = isRoutes;
+        routes.hidden = !isRoutes;
+        document.querySelectorAll('.plan-switch-btn').forEach(b => {
+            const on = b.getAttribute('data-planview') === view;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        appContainer.setAttribute('data-planview', view);
+        if (window.MVBRoutes) window.MVBRoutes.onViewChange(view);
+    }
+    document.querySelectorAll('.plan-switch-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            const view = b.getAttribute('data-planview');
+            setPlanView(view);
+            if (view === 'routes' && destInput && !destInput.value.trim()) destInput.focus();
+            if (view === 'board' && !departuresCache.length) fetchDepartures();
+        });
+    });
+
     function switchTab(targetTabId) {
+        if (targetTabId === 'connections') {
+            targetTabId = 'departures';
+            setPlanView('routes');
+        }
         if (connectionStopsInterval) {
             clearInterval(connectionStopsInterval);
             connectionStopsInterval = null;
@@ -970,12 +975,6 @@ document.addEventListener('DOMContentLoaded', () => {
             heroSection.style.display = 'block';
             heroSection.hidden = false;
             formDepartures.hidden = false;
-            formConnections.hidden = true;
-        } else if (targetTabId === 'connections') {
-            heroSection.style.display = 'block';
-            heroSection.hidden = false;
-            formDepartures.hidden = true;
-            formConnections.hidden = false;
         } else {
             // Hide search card entirely for Alerts & Map networks
             heroSection.style.display = 'none';
@@ -1133,9 +1132,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             uniqueList.forEach(station => {
                 const li = document.createElement('li');
-                li.className = 'suggestion-item';
+                li.className = 'suggestion-item' + (station.kind && station.kind !== 'stop' ? ' kind-' + station.kind : '');
                 li.role = 'option';
                 li.textContent = station.name;
+                if (station.kind === 'address' || station.kind === 'poi') {
+                    const tag = document.createElement('span');
+                    tag.className = 'suggestion-kind';
+                    tag.textContent = station.kind === 'address' ? 'Adresse' : 'Ort';
+                    li.appendChild(tag);
+                }
                 li.addEventListener('mousedown', (e) => {
                     // Prevent input blur before click registers
                     e.preventDefault();
@@ -1221,50 +1226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submitDepBtn.click();
     }, () => submitDepBtn.click());
 
-    setupAutocomplete(originInput, originSuggestions, null, (station) => {
-        originStation = station;
-        if (!destInput.value.trim()) destInput.focus();
-    }, () => destInput.focus());
-
-    setupAutocomplete(destInput, destSuggestions, null, (station) => {
-        destStation = station;
-    }, () => submitConnBtn.click());
-
-    // Typing a new name invalidates the previously picked station object
-    originInput.addEventListener('input', () => { if (originStation && originInput.value.trim() !== originStation.name) originStation = null; });
-    destInput.addEventListener('input', () => { if (destStation && destInput.value.trim() !== destStation.name) destStation = null; });
-
     if (clearStationBtn && stationInput.value.trim()) clearStationBtn.hidden = false;
-
-    transportBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const mode = btn.getAttribute('data-mode');
-            allowedTransport[mode] = !allowedTransport[mode];
-            btn.classList.toggle('active', allowedTransport[mode]);
-            btn.setAttribute('aria-pressed', allowedTransport[mode] ? 'true' : 'false');
-        });
-    });
-
-    swapBtn.addEventListener('click', () => {
-        const startVal = originInput.value;
-        const startStationObj = originStation;
-
-        originInput.value = destInput.value;
-        originStation = destStation;
-
-        destInput.value = startVal;
-        destStation = startStationObj;
-
-        swapBtn.style.transform = 'rotate(180deg)';
-        swapBtn.style.transition = 'transform 0.4s var(--ease-spring)';
-        setTimeout(() => {
-            swapBtn.style.transform = 'none';
-            swapBtn.style.transition = 'none';
-        }, 400);
-
-        announceToScreenReader('Start- und Zielort getauscht.');
-    });
 
     // -----------------------------------------------------------------------
     // Filter Pills handling
@@ -1341,32 +1303,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    connNowBtn.addEventListener('click', () => {
-        isConnNowActive = !isConnNowActive;
-        connNowBtn.classList.toggle('active', isConnNowActive);
-        connNowBtn.setAttribute('aria-pressed', isConnNowActive ? 'true' : 'false');
-        
-        if (isConnNowActive) {
-            setDateTimeToNow();
-            startLiveUpdateEngine();
-            showToast('Live-Modus für Verbindungssuche aktiv.', 'success');
-        } else {
-            stopLiveUpdateEngine();
-            showToast('Live-Modus für Verbindungssuche beendet.', 'info');
-        }
-    });
-
-    [connDate, connTime].forEach(input => {
-        input.addEventListener('change', () => {
-            if (isConnNowActive) {
-                isConnNowActive = false;
-                connNowBtn.classList.remove('active');
-                connNowBtn.setAttribute('aria-pressed', 'false');
-                stopLiveUpdateEngine();
-            }
-        });
-    });
-
     function startLiveUpdateEngine() {
         if (nowInterval) clearInterval(nowInterval);
         if (silentFetchInterval) clearInterval(silentFetchInterval);
@@ -1374,7 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nowInterval = setInterval(updateAllCountdowns, 1000);
 
         silentFetchInterval = setInterval(() => {
-            if (isNowModeActive || isConnNowActive) {
+            if (isNowModeActive) {
                 setDateTimeToNow();
             }
             if (isNowModeActive) {
@@ -1384,7 +1320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stopLiveUpdateEngine() {
-        if (!isNowModeActive && !isConnNowActive) {
+        if (!isNowModeActive) {
             if (nowInterval) {
                 clearInterval(nowInterval);
                 nowInterval = null;
@@ -1429,11 +1365,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const durationVal = depDuration.value;
 
         try {
-            const url = `${API_BASE}/departures?station_id=${currentStation.id}&date=${dateVal}&time=${timeVal}&duration=${durationVal}`;
+            const url = `${API_BASE}/departures?station_id=${encodeURIComponent(currentStation.id)}&date=${dateVal}&time=${timeVal}&duration=${durationVal}&station_name=${encodeURIComponent(currentStation.name || '')}`;
             const res = await fetch(url);
             const data = await res.json();
-            
-            departuresCache = Array.isArray(data) ? data : [];
+            if (!Array.isArray(data)) {
+                if (silent) { departuresLoading.hidden = true; return; }
+                throw new Error((data && data.error) || 'Abfahrten nicht verfügbar');
+            }
+            departuresCache = data;
             departuresLoading.hidden = true;
             renderDepartures(departuresCache, silent);
             updateBoardHeader();
@@ -1467,6 +1406,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!activeFilters.all) {
                 const lineLower = (dep.line || '').toLowerCase();
                 const isTram = (dep.type === 'tram');
+                if (dep.type === 'ubahn') return !!activeFilters.sbahn;
+                if (dep.type === 'ferry') return !!activeFilters.bus;
                 const isBus = (dep.type === 'bus' || dep.type === 'sev' || dep.isSEV);
                 const isSbahn = (dep.type === 'sbahn' || lineLower.startsWith('s1') || lineLower.startsWith('s-bahn') || lineLower.startsWith('s 1'));
                 const isRegio = (dep.type === 'regional' || dep.type === 'express' || dep.type === 'hsb');
@@ -1736,6 +1677,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         rememberStation(currentStation);
         switchTab('departures');
+        if (window.MVBRoutes && window.MVBRoutes.hasDestination()) {
+            setPlanView('routes');
+            window.MVBRoutes.search();
+            scrollToResults();
+            return;
+        }
+        setPlanView('board');
+        if (currentStation.kind === 'address') {
+            departuresList.innerHTML = '';
+            departuresEmpty.hidden = false;
+            const et = departuresEmpty.querySelector('.empty-title');
+            const es = departuresEmpty.querySelector('.empty-subtitle');
+            if (et) et.textContent = 'Das ist eine Adresse';
+            if (es) es.textContent = 'Abfahrten gibt es nur für Haltestellen. Mit einem Ziel bei „Nach“ findest du aber Verbindungen ab dieser Adresse.';
+            return;
+        }
         fetchDepartures();
         scrollToResults();
     });
@@ -1757,7 +1714,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function rememberStation(station) {
         if (!station || !station.id || !station.name) return;
         const list = getRecentStations().filter(s => String(s.id) !== String(station.id));
-        list.unshift({ id: station.id, name: station.name });
+        list.unshift({ id: station.id, name: station.name, kind: station.kind });
         try { localStorage.setItem('recent_stations', JSON.stringify(list.slice(0, 6))); } catch (e) {}
         renderQuickStations();
     }
@@ -1784,13 +1741,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = shortStationName(st.name);
             btn.title = st.name;
             btn.addEventListener('click', () => {
-                currentStation = { id: st.id, name: st.name };
+                currentStation = { id: st.id, name: st.name, kind: st.kind };
                 stationInput.value = st.name;
                 if (clearStationBtn) clearStationBtn.hidden = false;
-                rememberStation(currentStation);
-                switchTab('departures');
-                fetchDepartures();
-                scrollToResults();
+                submitDepBtn.click();
             });
             wrap.appendChild(btn);
         });
@@ -1808,6 +1762,96 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // Adaptive Detail View Dispatcher (Mobile Modal vs Desktop Right Panel)
     // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Trip helpers for connections ("Fahrt verfolgen"): leg switcher, own realtime, ride segment
+    // -----------------------------------------------------------------------
+    function normStop(n) {
+        return (n || '').toLowerCase().replace(/^magdeburg,\s*/, '').replace(/,\s*magdeburg$/, '')
+            .replace(/\s*\((tram|bus|tram\/bus)\)/g, '').replace(/[^a-z0-9äöüß]/g, '');
+    }
+
+    async function resolveMvbMatch(dep) {
+        if (!dep.matchMvb || dep._matchTried) return;
+        dep._matchTried = true;
+        try {
+            const q = `stop=${encodeURIComponent(dep.station_name || '')}&line=${encodeURIComponent(dep.label || dep.line || '')}&time=${encodeURIComponent(dep.time || '')}&date=${encodeURIComponent(dep.date || '')}`;
+            const res = await fetch(`${API_BASE}/journey/match?${q}`);
+            const data = await res.json();
+            if (data && data.journey_id) {
+                dep.journey_id = data.journey_id;
+                dep.ownRealtime = true;
+            }
+        } catch (e) { /* keep bahn.de trip */ }
+    }
+
+    function journeyQuery(dep) {
+        const st = dep.station_name || (currentStation && currentStation.name) || '';
+        let q = `journey_id=${encodeURIComponent(dep.journey_id)}&line=${encodeURIComponent(dep.line)}&direction=${encodeURIComponent(dep.direction)}&time=${encodeURIComponent(dep.time)}&delay=${encodeURIComponent(dep.delay || 0)}&station_name=${encodeURIComponent(st)}`;
+        if (String(dep.journey_id || '').startsWith('db|') && dep.lineColor) q += `&color=${encodeURIComponent(dep.lineColor)}`;
+        return q + `&_=${Date.now()}`;
+    }
+
+    function renderLegSwitch(anchorEl, dep) {
+        if (!anchorEl) return;
+        let host = anchorEl.previousElementSibling && anchorEl.previousElementSibling.classList.contains('trip-leg-switch')
+            ? anchorEl.previousElementSibling : null;
+        if (!dep.tripLegs || dep.tripLegs.length < 2) {
+            if (host) host.remove();
+            return;
+        }
+        if (!host) {
+            host = document.createElement('div');
+            host.className = 'trip-leg-switch';
+            host.setAttribute('role', 'tablist');
+            host.setAttribute('aria-label', 'Teilstrecken');
+            anchorEl.parentNode.insertBefore(host, anchorEl);
+        }
+        host.innerHTML = '';
+        dep.tripLegs.forEach((leg, i) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'trip-leg-chip' + (i === dep.tripLegIndex ? ' active' : '');
+            b.setAttribute('role', 'tab');
+            b.setAttribute('aria-selected', i === dep.tripLegIndex ? 'true' : 'false');
+            const dark = getLuminance(leg.lineColor) > 180;
+            b.innerHTML = `<span class="trip-leg-badge${dark ? ' dark-text' : ''}" style="background:${escapeHtml(leg.lineColor || '#018e4a')}">${escapeHtml(leg.label || leg.line)}</span><span class="trip-leg-meta">${escapeHtml(leg.time || '')}</span>`;
+            b.title = `${leg.line} Richtung ${leg.direction}`;
+            b.addEventListener('click', () => { if (i !== dep.tripLegIndex) handleItemSelection(leg); });
+            host.appendChild(b);
+        });
+    }
+
+    function markTripSegment(routeContainer, dep) {
+        if (!routeContainer || !dep.boardStop) return;
+        const rows = Array.from(routeContainer.querySelectorAll('.journey-stop'));
+        const b = normStop(dep.boardStop), a = normStop(dep.alightStop);
+        let bi = rows.findIndex(r => normStop((r.querySelector('.stop-name') || {}).textContent) === b);
+        if (bi < 0) bi = rows.findIndex(r => { const n = normStop((r.querySelector('.stop-name') || {}).textContent); return n && (n.includes(b) || b.includes(n)); });
+        let ai = -1;
+        rows.forEach((r, i) => {
+            if (i <= bi) return;
+            const n = normStop((r.querySelector('.stop-name') || {}).textContent);
+            if (ai < 0 && n && (n === a || n.includes(a) || a.includes(n))) ai = i;
+        });
+        rows.forEach((r, i) => {
+            r.classList.remove('trip-board', 'trip-alight', 'trip-ride', 'trip-outside');
+            r.querySelectorAll('.trip-stop-tag').forEach(t => t.remove());
+            if (bi < 0) return;
+            const end = ai >= 0 ? ai : rows.length - 1;
+            if (i === bi || i === ai) {
+                r.classList.add(i === bi ? 'trip-board' : 'trip-alight');
+                const info = r.querySelector('.stop-info');
+                if (info) {
+                    const tag = document.createElement('span');
+                    tag.className = 'trip-stop-tag';
+                    tag.textContent = i === bi ? 'Einstieg' : 'Ausstieg';
+                    info.appendChild(tag);
+                }
+            } else if (i > bi && i < end) r.classList.add('trip-ride');
+            else r.classList.add('trip-outside');
+        });
+    }
+
     function handleItemSelection(dep) {
         activeJourneyData = dep;
         
@@ -1831,7 +1875,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const titlePrefix = cleanLineName.toLowerCase().startsWith('linie') ? '' : 'Linie ';
         detailsTitle.textContent = `${titlePrefix}${cleanLineName}`;
         detailsSubtitle.textContent = `Richtung ${dep.direction}`;
-        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('detailsRemind'), dep, currentStation && currentStation.name);
+        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('detailsRemind'), dep, dep.station_name || (currentStation && currentStation.name));
+        renderLegSwitch(detailsRoute, dep);
 
         const luminance = getLuminance(dep.lineColor);
         detailsLineBadge.textContent = cleanLineName;
@@ -1842,7 +1887,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const loadDetails = async (isQuiet = false) => {
             try {
-                const queryParams = `journey_id=${encodeURIComponent(dep.journey_id)}&line=${encodeURIComponent(dep.line)}&direction=${encodeURIComponent(dep.direction)}&time=${encodeURIComponent(dep.time)}&delay=${encodeURIComponent(dep.delay || 0)}&station_name=${encodeURIComponent(currentStation.name)}&_=${Date.now()}`;
+                await resolveMvbMatch(dep);
+                const queryParams = journeyQuery(dep);
                 const res = await fetch(`${API_BASE}/journey?${queryParams}`);
                 const data = await res.json();
                 
@@ -1864,6 +1910,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         detailsLineBadge.classList.toggle('dark-text', lum > 180);
                     }
                     renderStopsTimelineHTML(data, detailsRoute, detailsMessages, !isQuiet);
+                    markTripSegment(detailsRoute, dep);
                     updateDepartureCardDelay(targetId, data);
                     renderOperator(data.operator, detailsOperator);
                 }
@@ -1892,7 +1939,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const titlePrefix = cleanLineName.toLowerCase().startsWith('linie') ? '' : 'Linie ';
         journeyModalTitle.textContent = `${titlePrefix}${cleanLineName}`;
         modalDirection.textContent = `Richtung ${dep.direction}`;
-        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('modalRemind'), dep, currentStation && currentStation.name);
+        if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('modalRemind'), dep, dep.station_name || (currentStation && currentStation.name));
+        renderLegSwitch(journeyRoute, dep);
 
         const luminance = getLuminance(dep.lineColor);
         modalLineBadge.textContent = cleanLineName;
@@ -1908,7 +1956,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 journeyLoading.hidden = false;
             }
             try {
-                const queryParams = `journey_id=${encodeURIComponent(dep.journey_id)}&line=${encodeURIComponent(dep.line)}&direction=${encodeURIComponent(dep.direction)}&time=${encodeURIComponent(dep.time)}&delay=${encodeURIComponent(dep.delay || 0)}&station_name=${encodeURIComponent(currentStation.name)}&_=${Date.now()}`;
+                await resolveMvbMatch(dep);
+                const queryParams = journeyQuery(dep);
                 const res = await fetch(`${API_BASE}/journey?${queryParams}`);
                 const data = await res.json();
                 
@@ -1932,6 +1981,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     modalLineBadge.classList.toggle('dark-text', lum > 180);
                 }
                 renderStopsTimelineHTML(data, journeyRoute, journeyMessages, !isQuiet);
+                markTripSegment(journeyRoute, dep);
                 updateDepartureCardDelay(mobTargetId, data);
                 renderOperator(data.operator, modalOperator);
             } catch (err) {
@@ -2673,255 +2723,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // Connections Search Submission
     // -----------------------------------------------------------------------
-    async function triggerConnectionSearch() {
-        const startText = originInput.value.trim();
-        const destText = destInput.value.trim();
-
-        if (!startText || !destText) {
-            showToast('Bitte gib einen Start- und Zielort ein', 'warning');
-            return;
-        }
-
-        connectionsLoading.hidden = false;
-        connectionsList.innerHTML = '';
-        connectionsEmpty.hidden = true;
-
-        const dateVal = connDate.value;
-        const timeVal = connTime.value;
-
-        const originId = originStation ? originStation.id : startText;
-        const destId = destStation ? destStation.id : destText;
-
-        try {
-            const url = `${API_BASE}/connections?origin=${encodeURIComponent(originId)}&destination=${encodeURIComponent(destId)}&date=${dateVal}&time=${timeVal}&tram=${allowedTransport.tram}&bus=${allowedTransport.bus}&sbahn=${allowedTransport.sbahn}&regional=${allowedTransport.regional}&express=${allowedTransport.express}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            
-            connectionsLoading.hidden = true;
-            renderConnections(data);
-        } catch (err) {
-            console.error('Verbindungsfehler:', err);
-            connectionsLoading.hidden = true;
-            connectionsList.innerHTML = '<div class="error-card glass-card">Die Verbindungen konnten nicht geladen werden.</div>';
-        }
-    }
-
-    submitConnBtn.addEventListener('click', () => {
-        const originSuggestions = document.getElementById('originSuggestions');
-        const destSuggestions = document.getElementById('destSuggestions');
-        if (originSuggestions) originSuggestions.hidden = true;
-        if (destSuggestions) destSuggestions.hidden = true;
-        switchTab('connections');
-        triggerConnectionSearch();
-        scrollToResults();
-    });
-
-    function renderConnections(conns) {
-        connectionsList.innerHTML = '';
-        if (!Array.isArray(conns) || !conns.length) {
-            const et = connectionsEmpty.querySelector('.empty-title');
-            const es = connectionsEmpty.querySelector('.empty-subtitle');
-            if (et) et.textContent = 'Keine Verbindung gefunden';
-            if (es) es.textContent = 'Versuch es mit einer anderen Uhrzeit, anderen Haltestellen oder mehr Verkehrsmitteln.';
-            connectionsEmpty.hidden = false;
-            return;
-        }
-        connectionsEmpty.hidden = true;
-
-        conns.forEach((conn, idx) => {
-            const firstLeg = conn.legs[0];
-            const lastLeg = conn.legs[conn.legs.length - 1];
-            const depTime = firstLeg ? firstLeg.departure_time : '';
-            const arrTime = lastLeg ? lastLeg.arrival_time : '';
-
-            const card = document.createElement('div');
-            card.className = 'connection-card';
-            card.style.setProperty('--i', idx);
-            card.setAttribute('role', 'button');
-            card.setAttribute('tabindex', '0');
-            card.setAttribute('aria-expanded', 'false');
-
-            const toMins = (t) => {
-                if (!t || !/^\d{1,2}:\d{2}/.test(t)) return null;
-                const [h, m] = t.split(':').map(Number);
-                return h * 60 + m;
-            };
-            let legsPreviewHtml = '<div class="connection-timeline-bar-container" aria-hidden="true">';
-            conn.legs.forEach(leg => {
-                const isWalk = leg.type === 'walk';
-                const styleColor = isWalk ? 'transparent' : (leg.lineColor || '#018e4a');
-                let legLabel = isWalk ? '🚶' : escapeHtml(leg.line);
-                if (leg.type === 'sbahn') legLabel = `<span class="sbahn-symbol">S</span>${escapeHtml(leg.line)}`;
-                else if (leg.type === 'hsb') legLabel = `🚂 ${escapeHtml(leg.line)}`;
-                const start = toMins(leg.departure_time);
-                let end = toMins(leg.arrival_time);
-                if (start !== null && end !== null && end < start) end += 1440;
-                const weight = (start !== null && end !== null) ? Math.max(end - start, 2) : 5;
-                const darkText = !isWalk && getLuminance(leg.lineColor) > 180 ? 'dark-text' : '';
-                legsPreviewHtml += `<div class="leg-segment ${isWalk ? 'walk' : ''} ${darkText}" style="flex:${weight} 1 0; background-color:${styleColor};"><span>${legLabel}</span></div>`;
-            });
-            legsPreviewHtml += '</div>';
-
-            let timelineHtml = `<div class="connection-timeline" style="display: none;">`;
-            conn.legs.forEach((leg, lIdx) => {
-                const textClass = getLuminance(leg.lineColor) > 180 ? 'dark-text' : '';
-                const isTransit = leg.type !== 'walk';
-                
-                let detailRow = '';
-                if (isTransit) {
-                    let delayHtml = '';
-                    if (leg.departure_delay !== null && leg.departure_delay !== undefined) {
-                        if (leg.departure_delay > 0) {
-                            delayHtml = `<span class="leg-delay positive" style="font-size:10px; margin-left:6px; color:var(--danger); font-weight:700;">+${leg.departure_delay} Min</span>`;
-                        } else if (leg.departure_delay < 0) {
-                            delayHtml = `<span class="leg-delay early" style="font-size:10px; margin-left:6px; color:#00b4d8; font-weight:700;">${leg.departure_delay} Min</span>`;
-                        } else {
-                            delayHtml = `<span class="leg-delay on-time" style="font-size:10px; margin-left:6px; color:var(--success); font-weight:700;">(pünktlich)</span>`;
-                        }
-                    } else {
-                        delayHtml = `<span class="leg-delay no-rt" style="font-size:10px; margin-left:6px; color:var(--text-muted);">(keine Echtzeit)</span>`;
-                    }
-
-                    const lineLower = (leg.line || '').toLowerCase();
-                    const isSbahn = (leg.type === 'sbahn' || lineLower.startsWith('s1') || lineLower.startsWith('s-bahn') || lineLower.startsWith('s 1'));
-                    const isHsb = (leg.type === 'hsb' || lineLower.includes('hsb') || lineLower.includes('brocken'));
-                    const isSev = (leg.type === 'sev' || leg.isSEV || leg.line.toUpperCase().startsWith('SEV'));
-
-                    let badgeIcon = '';
-                    let badgeClass = '';
-                    if (isSbahn) {
-                        badgeClass = 'sbahn-badge';
-                        badgeIcon = '<span class="sbahn-symbol">S</span> ';
-                    } else if (isHsb) {
-                        badgeClass = 'hsb-badge';
-                        badgeIcon = '🚂 ';
-                    } else if (isSev) {
-                        badgeClass = 'sev-badge';
-                        badgeIcon = '🚌 ';
-                    }
-                    
-                    detailRow = `
-                        <div class="connection-leg transit-leg" style="--leg-color: ${leg.lineColor || 'var(--primary)'}">
-                            <div class="leg-departure">
-                                <span class="leg-time">${leg.departure_time}</span>
-                                <span class="leg-station"><strong>${leg.origin}</strong></span>
-                                ${delayHtml}
-                            </div>
-                            <div class="leg-line-info">
-                                <span class="leg-line-badge ${textClass} ${badgeClass}" style="background-color: ${leg.lineColor}">${badgeIcon}${leg.line}</span>
-                                <span class="leg-direction">Richtung ${leg.destination}</span>
-                                ${leg.platform ? `<span class="stop-platform-badge" style="margin-left:8px;">${formatPlatform(leg.platform)}</span>` : ''}
-                            </div>
-                            <div class="leg-arrival">
-                                <span class="leg-time">${leg.arrival_time}</span>
-                                <span class="leg-station">${leg.destination}</span>
-                            </div>
-                            
-                            <button class="show-live-tracking-btn" data-jid="${leg.journey_id}" data-line="${leg.line}" data-dir="${leg.destination}" data-time="${leg.departure_time}" data-delay="${leg.departure_delay || 0}" data-color="${leg.lineColor || '#018e4a'}" style="background:none; border:none; color:var(--primary); font-size:11px; font-weight:600; cursor:pointer; padding: 4px 0; margin-top:4px; display:flex; align-items:center; gap:4px;">
-                                ${isMvbTram(leg.type, leg.line) ? '🚋' : (isHsb ? '🚂' : (isSbahn ? '🟢' : (isSev ? '🚌' : '🚆')))} Live-Verlauf &amp; Position
-                            </button>
-                        </div>
-                    `;
-                } else {
-                    detailRow = `
-                        <div class="connection-leg walk-leg">
-                            <div class="leg-departure">
-                                <span class="leg-time">${leg.departure_time}</span>
-                                <span class="leg-station">${leg.origin}</span>
-                            </div>
-                            <div class="leg-walk-info">
-                                <span>🚶</span>
-                                <span>Fußweg (${leg.destination})</span>
-                            </div>
-                            <div class="leg-arrival">
-                                <span class="leg-time">${leg.arrival_time}</span>
-                                <span class="leg-station">${leg.destination}</span>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                timelineHtml += detailRow;
-
-                if (lIdx < conn.legs.length - 1) {
-                    timelineHtml += `
-                        <div class="transfer-indicator">
-                            <span>🔄 Umsteigen</span>
-                        </div>
-                    `;
-                }
-            });
-            timelineHtml += `</div>`;
-
-            const durationLabel = conn.duration >= 60
-                ? `${Math.floor(conn.duration / 60)} Std ${conn.duration % 60} Min`
-                : `${conn.duration} Min`;
-            card.setAttribute('aria-label', `Verbindung ${depTime} bis ${arrTime}, ${durationLabel}, ${conn.transfers === 0 ? 'ohne Umstieg' : conn.transfers + ' Umstiege'}`);
-            card.innerHTML = `
-                <div class="connection-header">
-                    <div class="connection-times">
-                        <div class="connection-time-range">${depTime}<span class="arrow">→</span>${arrTime}</div>
-                    </div>
-                    <div class="connection-summary">
-                        <span class="connection-duration"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg>${durationLabel}</span>
-                        <span class="connection-transfers">${conn.transfers === 0 ? 'Direkt' : `${conn.transfers} Umstieg${conn.transfers > 1 ? 'e' : ''}`}</span>
-                    </div>
-                </div>
-                ${legsPreviewHtml}
-                <div class="connection-toggle-hint"><span class="hint-text">Details anzeigen</span><span class="chev" aria-hidden="true">▾</span></div>
-                ${timelineHtml}
-            `;
-
-            const toggleDetails = () => {
-                const timeline = card.querySelector('.connection-timeline');
-                const willExpand = timeline.style.display !== 'block';
-                timeline.style.display = willExpand ? 'block' : 'none';
-                card.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
-                const hintText = card.querySelector('.connection-toggle-hint .hint-text');
-                if (hintText) hintText.textContent = willExpand ? 'Details ausblenden' : 'Details anzeigen';
-            };
-
-            card.addEventListener('click', (e) => {
-                if (e.target.closest('.show-live-tracking-btn')) return;
-                toggleDetails();
-            });
-
-            card.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    if (e.target.closest('.show-live-tracking-btn')) return;
-                    e.preventDefault();
-                    toggleDetails();
-                }
-            });
-
-            connectionsList.appendChild(card);
-        });
-
-        // Wire up live tracking buttons for connection legs
-        document.querySelectorAll('.show-live-tracking-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation(); // prevent expanding/collapsing parent connection card
-                const jid = btn.getAttribute('data-jid');
-                const line = btn.getAttribute('data-line');
-                const direction = btn.getAttribute('data-dir');
-                const time = btn.getAttribute('data-time');
-                const delay = parseInt(btn.getAttribute('data-delay') || '0', 10);
-                const lineColor = btn.getAttribute('data-color');
-
-                const journeyData = {
-                    journey_id: jid,
-                    line: line,
-                    direction: direction,
-                    time: time,
-                    delay: delay,
-                    lineColor: lineColor
-                };
-
-                handleItemSelection(journeyData);
-            });
-        });
-    }
-
     // -----------------------------------------------------------------------
     // Quick Actions Bar Click Handlers
     // -----------------------------------------------------------------------
@@ -2940,7 +2741,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 switchTab('connections');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 setTimeout(() => {
-                    originInput.focus();
+                    if (destInput) destInput.focus();
                 }, 100);
             } else if (action === 'tickets') {
                 switchTab('tickets');
@@ -3612,6 +3413,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Live-Netzkarte
+    window.MVBApp = {
+        apiBase: API_BASE,
+        escapeHtml, getLuminance, showToast, formatPlatform, announceToScreenReader,
+        handleItemSelection, switchTab, setPlanView, scrollToResults, setupAutocomplete,
+        resolveStationFromText, fetchDepartures, applyTheme: (t) => applyTheme(t),
+        getCurrentStation: () => currentStation,
+        getTheme: () => currentTheme,
+        setCurrentStation: (st) => {
+            currentStation = st;
+            stationInput.value = st ? st.name : '';
+            if (clearStationBtn) clearStationBtn.hidden = !stationInput.value;
+        },
+        isNowMode: () => isNowModeActive,
+        getDateTime: () => ({ date: depDate.value, time: depTime.value }),
+        setDuration: (v) => { if (depDuration) depDuration.value = String(v); },
+        submit: () => submitDepBtn.click(),
+    };
+    document.dispatchEvent(new CustomEvent('mvb:app-ready'));
+
     if (window.LiveMap) {
         window.LiveMap.init({
             apiBase: API_BASE,

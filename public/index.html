@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=9.7">
+  <link rel="stylesheet" href="styles.css?v=10.0">
 </head>
 <body>
   <!-- SVG Icon Sprite -->
@@ -51,6 +51,10 @@
     <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></symbol>
+    <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m10 21 2-6 3 3v3M8 12l3-4 4 2 3 2M11 8l-1 5"/></symbol>
   </svg>
 
   <a href="#main-results-area" class="skip-link">Zum Inhalt springen</a>
@@ -128,8 +132,7 @@
 
         <nav class="header-nav" aria-label="Hauptnavigation">
           <button class="nav-link" data-target="home"><svg class="ico" aria-hidden="true"><use href="#i-home"/></svg><span>Start</span></button>
-          <button class="nav-link" data-target="departures"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg><span>Abfahrten</span></button>
-          <button class="nav-link" data-target="connections"><svg class="ico" aria-hidden="true"><use href="#i-route"/></svg><span>Verbindungen</span></button>
+          <button class="nav-link" data-target="departures"><svg class="ico" aria-hidden="true"><use href="#i-route"/></svg><span>Fahrplan</span></button>
           <button class="nav-link" data-target="map"><svg class="ico" aria-hidden="true"><use href="#i-map"/></svg><span>Live-Karte</span></button>
           <button class="nav-link" data-target="alerts"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span>Meldungen</span> <span class="badge" id="headerAlertBadge" hidden>0</span></button>
           <button class="nav-link" data-target="tickets"><svg class="ico" aria-hidden="true"><use href="#i-ticket"/></svg><span>Tickets</span></button>
@@ -139,6 +142,7 @@
         <div class="header-actions">
           <div class="header-time" id="headerTime" aria-label="Aktuelle Uhrzeit">--:--</div>
           <button type="button" class="header-install-btn" data-install-app hidden title="Als App installieren" aria-label="Als App installieren"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span>App</span></button>
+          <button type="button" id="settingsBtn" class="header-theme-btn" aria-label="Einstellungen" title="Einstellungen"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg></button>
           <button id="themeToggleBtn" class="header-theme-btn" aria-label="Farbschema wechseln" title="Farbschema wechseln"><svg class="ico" aria-hidden="true"><use href="#i-moon"/></svg></button>
         </div>
       </div>
@@ -170,117 +174,71 @@
           <!-- Search Card -->
           <div class="search-widget-card glass-card" id="unifiedSearchWidget">
 
-            <!-- FORM 1: DEPARTURES -->
-            <div class="widget-form-panel" id="form-departures" role="tabpanel" aria-label="Abfahrtszeiten Suche">
-              <div class="search-field">
-                <label for="stationInput" class="field-label">Haltestelle</label>
-                <div class="input-wrapper">
-                  <svg class="input-icon ico" aria-hidden="true"><use href="#i-search"/></svg>
-                  <input type="text" id="stationInput" class="widget-input"
-                         placeholder="Haltestelle eingeben..."
-                         autocomplete="off"
-                         enterkeyhint="search"
-                         aria-label="Haltestelle suchen"
-                         aria-autocomplete="list"
-                         aria-controls="stationSuggestions"
-                         aria-expanded="false"
-                         value="Magdeburg, Hauptbahnhof/Willy-Brandt-Platz">
-                  <button class="clear-btn" id="clearStation" aria-label="Eingabe löschen" hidden><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
-                </div>
-                <ul id="stationSuggestions" class="suggestions-list" role="listbox" aria-label="Haltestellenvorschläge" hidden></ul>
-              </div>
-
-              <div class="quick-stations" id="quickStations" aria-label="Schnellwahl Haltestellen"></div>
-
-              <div class="datetime-row">
-                <div class="datetime-field">
-                  <label for="depDate">Datum</label>
-                  <div class="input-wrapper">
-                    <input type="date" id="depDate" aria-label="Abfahrtsdatum">
-                  </div>
-                </div>
-                <div class="datetime-field">
-                  <label for="depTime">Uhrzeit</label>
-                  <div class="input-wrapper">
-                    <input type="time" id="depTime" aria-label="Abfahrtszeit">
-                  </div>
-                </div>
-                <div class="datetime-field">
-                  <label for="depDuration">Zeitraum</label>
-                  <div class="input-wrapper">
-                    <select id="depDuration" aria-label="Zeitraum">
-                      <option value="30">30 min</option>
-                      <option value="60" selected>60 min</option>
-                      <option value="120">2 Std</option>
-                      <option value="240">4 Std</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-actions">
-                <button class="now-btn active" id="nowBtn" aria-label="Live-Modus umschalten" aria-pressed="true">
-                  <span class="now-dot" aria-hidden="true"></span> Jetzt (Live)
-                </button>
-                <button class="submit-btn" id="submitDepBtn"><span>Abfahrten zeigen</span><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg></button>
-              </div>
-            </div>
-
-            <!-- FORM 2: CONNECTIONS -->
-            <div class="widget-form-panel" id="form-connections" role="tabpanel" aria-label="Verbindungs-Suche" hidden>
-              <div class="connection-inputs-grid">
-                <div class="search-field">
-                  <label for="originInput" class="field-label">Von</label>
+            <!-- FAHRPLAN: one form for departures (only "Von") and connections ("Von" + "Nach") -->
+            <div class="widget-form-panel plan-form" id="form-departures" role="search" aria-label="Fahrplan-Suche">
+              <div class="plan-fields">
+                <div class="search-field plan-field">
+                  <label for="stationInput" class="field-label">Von</label>
                   <div class="input-wrapper">
                     <svg class="input-icon ico" aria-hidden="true"><use href="#i-pin"/></svg>
-                    <input type="text" id="originInput" class="widget-input" placeholder="Start-Haltestelle..." autocomplete="off" enterkeyhint="next" aria-label="Abfahrtsort" aria-autocomplete="list" aria-controls="originSuggestions" aria-expanded="false">
+                    <input type="text" id="stationInput" class="widget-input"
+                           placeholder="Haltestelle oder Adresse…"
+                           autocomplete="off"
+                           enterkeyhint="search"
+                           aria-label="Start-Haltestelle"
+                           aria-autocomplete="list"
+                           aria-controls="stationSuggestions"
+                           aria-expanded="false"
+                           value="Magdeburg, Hauptbahnhof/Willy-Brandt-Platz">
+                    <button class="clear-btn" id="clearStation" aria-label="Start löschen" hidden><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
                   </div>
-                  <ul id="originSuggestions" class="suggestions-list" role="listbox" aria-label="Start-Vorschläge" hidden></ul>
+                  <ul id="stationSuggestions" class="suggestions-list" role="listbox" aria-label="Start-Vorschläge" hidden></ul>
                 </div>
 
-                <button class="swap-btn" id="swapBtn" aria-label="Start und Ziel tauschen" title="Start und Ziel tauschen"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg></button>
+                <button type="button" class="swap-btn plan-swap" id="swapBtn" aria-label="Start und Ziel tauschen" title="Start und Ziel tauschen"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg></button>
 
-                <div class="search-field">
-                  <label for="destInput" class="field-label">Nach</label>
-                  <div class="input-wrapper">
+                <div class="search-field plan-field">
+                  <label for="destInput" class="field-label">Nach <span class="field-hint">– optional, leer = Abfahrten</span></label>
+                  <div class="input-wrapper plan-dest-wrap" id="destWrap">
                     <svg class="input-icon ico" aria-hidden="true"><use href="#i-target"/></svg>
-                    <input type="text" id="destInput" class="widget-input" placeholder="Ziel-Haltestelle..." autocomplete="off" enterkeyhint="search" aria-label="Zielort" aria-autocomplete="list" aria-controls="destSuggestions" aria-expanded="false">
+                    <input type="text" id="destInput" class="widget-input" placeholder="Ziel hinzufügen…" autocomplete="off" enterkeyhint="search" aria-label="Ziel-Haltestelle" aria-autocomplete="list" aria-controls="destSuggestions" aria-expanded="false">
+                    <button class="clear-btn" id="clearDest" aria-label="Ziel entfernen" hidden><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
                   </div>
                   <ul id="destSuggestions" class="suggestions-list" role="listbox" aria-label="Ziel-Vorschläge" hidden></ul>
                 </div>
               </div>
 
-              <div class="datetime-row two-cols">
-                <div class="datetime-field">
-                  <label for="connDate">Datum</label>
-                  <div class="input-wrapper">
-                    <input type="date" id="connDate" aria-label="Verbindungsdatum">
-                  </div>
-                </div>
-                <div class="datetime-field">
-                  <label for="connTime">Uhrzeit</label>
-                  <div class="input-wrapper">
-                    <input type="time" id="connTime" aria-label="Verbindungszeit">
-                  </div>
-                </div>
-              </div>
+              <div class="quick-stations" id="quickStations" aria-label="Schnellwahl"></div>
 
-              <div class="transport-toggles-container">
-                <span class="field-label">Verkehrsmittel</span>
-                <div class="transport-toggles-grid">
-                  <button type="button" class="transport-pill-btn active" data-mode="tram" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-tram"/></svg><span>Tram</span></button>
-                  <button type="button" class="transport-pill-btn active" data-mode="bus" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-bus"/></svg><span>Bus</span></button>
-                  <button type="button" class="transport-pill-btn active" data-mode="sbahn" aria-pressed="true"><span class="mode-s" aria-hidden="true">S</span><span>S-Bahn</span></button>
-                  <button type="button" class="transport-pill-btn active" data-mode="regional" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-train"/></svg><span>Regio</span></button>
-                  <button type="button" class="transport-pill-btn active" data-mode="express" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-express"/></svg><span>Fernverkehr</span></button>
+              <div class="plan-when">
+                <div class="plan-seg" id="timeModeGroup" role="group" aria-label="Zeitbezug" hidden>
+                  <button type="button" class="plan-seg-btn active" data-timemode="dep" aria-pressed="true">Abfahrt</button>
+                  <button type="button" class="plan-seg-btn" data-timemode="arr" aria-pressed="false">Ankunft</button>
                 </div>
+                <button class="now-btn active" id="nowBtn" type="button" aria-label="Live-Modus umschalten" aria-pressed="true">
+                  <span class="now-dot" aria-hidden="true"></span> Jetzt
+                </button>
+                <div class="datetime-field compact">
+                  <label for="depDate" class="sr-only">Datum</label>
+                  <div class="input-wrapper"><input type="date" id="depDate" aria-label="Datum"></div>
+                </div>
+                <div class="datetime-field compact">
+                  <label for="depTime" class="sr-only">Uhrzeit</label>
+                  <div class="input-wrapper"><input type="time" id="depTime" aria-label="Uhrzeit"></div>
+                </div>
+                <select id="depDuration" aria-label="Zeitraum" hidden>
+                  <option value="30">30 min</option>
+                  <option value="60" selected>60 min</option>
+                  <option value="120">2 Std</option>
+                  <option value="240">4 Std</option>
+                </select>
+                <button type="button" class="plan-options-btn" id="planOptionsBtn" aria-label="Optionen und Einstellungen">
+                  <svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg><span>Optionen</span><span class="plan-options-count" id="planOptionsCount" hidden>0</span>
+                </button>
               </div>
 
               <div class="form-actions">
-                <button class="now-btn active" id="connNowBtn" aria-label="Live-Modus für Verbindungssuche umschalten" aria-pressed="true">
-                  <span class="now-dot" aria-hidden="true"></span> Jetzt
-                </button>
-                <button class="submit-btn" id="submitConnBtn"><span>Verbindungen suchen</span><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg></button>
+                <button class="submit-btn" id="submitDepBtn" type="button"><span id="submitLabel">Abfahrten zeigen</span><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg></button>
               </div>
             </div>
           </div>
@@ -360,6 +318,11 @@
 
               <!-- === DEPARTURES === -->
               <div class="result-tab-content" id="panel-departures" hidden>
+                <div class="plan-switch" id="planSwitch" role="tablist" aria-label="Ansicht">
+                  <button type="button" class="plan-switch-btn active" role="tab" aria-selected="true" data-planview="board" id="planTabBoard">Abfahrten</button>
+                  <button type="button" class="plan-switch-btn" role="tab" aria-selected="false" data-planview="routes" id="planTabRoutes">Verbindungen</button>
+                </div>
+                <div id="planBoard">
                 <div class="board-header">
                   <div class="board-title-wrap">
                     <span class="board-live-dot" aria-hidden="true"></span>
@@ -393,21 +356,30 @@
                   <p class="empty-title">Keine Abfahrten gefunden</p>
                   <p class="empty-subtitle">In diesem Zeitraum fährt hier nichts — probier einen längeren Zeitraum oder einen anderen Filter.</p>
                 </div>
-              </div>
-
-              <!-- === CONNECTIONS === -->
-              <div class="result-tab-content" id="panel-connections" hidden>
-                <div id="connectionsLoading" class="loading-skeleton" hidden>
-                  <div class="skeleton-card tall"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
-                  <div class="skeleton-card tall"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
                 </div>
 
-                <div id="connectionsList" class="connections-list" role="list" aria-label="Verbindungsergebnisse"></div>
-
-                <div id="connectionsEmpty" class="empty-state">
-                  <span class="empty-icon" aria-hidden="true"><svg class="ico"><use href="#i-route"/></svg></span>
-                  <p class="empty-title">Wohin soll's gehen?</p>
-                  <p class="empty-subtitle">Gib oben Start &amp; Ziel ein und tippe auf „Verbindungen suchen“.</p>
+                <div id="planRoutes" hidden>
+                  <div class="routes-head">
+                    <div class="routes-title-wrap">
+                      <h2 class="board-title" id="routesTitle">Verbindungen</h2>
+                      <p class="board-meta" id="routesMeta">Gib oben ein Ziel ein.</p>
+                    </div>
+                    <button class="icon-btn" id="routesRefreshBtn" aria-label="Verbindungen aktualisieren" title="Aktualisieren"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+                  </div>
+                  <div class="routes-notice" id="routesNotice" hidden></div>
+                  <button type="button" class="routes-more" id="routesEarlier" hidden>↑ Frühere Verbindungen</button>
+                  <div id="routesLoading" class="loading-skeleton" hidden>
+                    <div class="skeleton-card tall"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                    <div class="skeleton-card tall"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                    <div class="skeleton-card tall"><div class="skeleton-badge"></div><div class="skeleton-lines"><div class="skeleton-text long"></div><div class="skeleton-text medium"></div></div></div>
+                  </div>
+                  <div id="routesList" class="routes-list" role="list" aria-label="Verbindungen" aria-live="polite"></div>
+                  <button type="button" class="routes-more" id="routesLater" hidden>↓ Spätere Verbindungen</button>
+                  <div id="routesEmpty" class="empty-state">
+                    <span class="empty-icon" aria-hidden="true"><svg class="ico"><use href="#i-route"/></svg></span>
+                    <p class="empty-title">Wohin soll's gehen?</p>
+                    <p class="empty-subtitle">Trag oben bei „Nach“ ein Ziel ein – deutschlandweit, mit Tram, Bus, U- und S-Bahn.</p>
+                  </div>
                 </div>
               </div>
 
@@ -1000,12 +972,8 @@
         <span class="tab-label">Start</span>
       </button>
       <button class="tab-btn" role="tab" aria-selected="false" data-tab="departures" id="tab-departures" aria-controls="panel-departures">
-        <svg class="tab-icon ico" aria-hidden="true"><use href="#i-clock"/></svg>
-        <span class="tab-label">Abfahrten</span>
-      </button>
-      <button class="tab-btn" role="tab" aria-selected="false" data-tab="connections" id="tab-connections" aria-controls="panel-connections">
         <svg class="tab-icon ico" aria-hidden="true"><use href="#i-route"/></svg>
-        <span class="tab-label">Route</span>
+        <span class="tab-label">Fahrplan</span>
       </button>
       <button class="tab-btn" role="tab" aria-selected="false" data-tab="alerts" id="tab-alerts" aria-controls="panel-alerts">
         <svg class="tab-icon ico" aria-hidden="true"><use href="#i-alert"/></svg>
@@ -1059,7 +1027,9 @@
   <script src="live-map.js?v=9.3"></script>
   <script src="season.js?v=1.0"></script>
   <script src="push.js?v=8.0"></script>
-  <script src="app.js?v=8.4"></script>
+  <script src="settings.js?v=1.0"></script>
+  <script src="app.js?v=9.0"></script>
+  <script src="routes.js?v=1.0"></script>
   <script>
     // Failsafe: Ladebildschirm spätestens nach 4 Sekunden entfernen
     setTimeout(function () {

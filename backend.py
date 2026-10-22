@@ -988,12 +988,17 @@ def search_station():
                 return []
 
         def query_db():
-            if not db_client:
-                return []
             try:
-                return [{"id": loc.id, "name": loc.name} for loc in db_client.locations(query) if loc.id]
+                out = []
+                for loc in dbweb.locations(query, limit=10):
+                    if loc.get('type') not in ('ST', 'ADR', 'POI'):
+                        continue
+                    out.append({"id": loc['id'], "name": loc['name'],
+                                "kind": {'ST': 'stop', 'ADR': 'address', 'POI': 'poi'}[loc['type']],
+                                "src": "db"})
+                return out
             except Exception as ex:
-                print(f"[WARN] DB location search failed: {ex}")
+                print(f"[WARN] bahn.de location search failed: {ex}")
                 return []
 
         def query_oebb():
@@ -1006,15 +1011,19 @@ def search_station():
                 return []
 
         from concurrent.futures import ThreadPoolExecutor
-        tasks = [query_nasa, query_db, query_oebb]
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        def _name_key(n):
+            parts = [x.strip() for x in re.sub(r'\s+', ' ', (n or '').lower()).split(',') if x.strip()]
+            return '|'.join(sorted(parts))
+        seen_names = {_name_key(n) for n in seen_names}
+        tasks = [query_nasa, query_db]
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(task) for task in tasks]
             for future in futures:
                 try:
-                    task_results = future.result(timeout=1.5)
+                    task_results = future.result(timeout=3)
                     for item in task_results:
                         iid = item.get("id")
-                        norm_name = item.get("name", "").strip().lower()
+                        norm_name = _name_key(item.get("name", ""))
                         if iid and iid not in seen_ids and norm_name not in seen_names:
                             results.append(item)
                             seen_ids.add(iid)
@@ -1045,6 +1054,8 @@ def get_departures():
     station_id = request.args.get('station_id')
     if not station_id:
         return jsonify({"error": "station_id required"}), 400
+    if station_id.startswith('db:'):
+        return _db_departures_response(station_id)
 
     date_param = request.args.get('date')       # YYYY-MM-DD
     time_param = request.args.get('time')       # HH:MM
@@ -1327,6 +1338,16 @@ def get_journey():
 
     if not journey_id:
         return jsonify({"error": "journey_id required"}), 400
+
+    if journey_id.startswith(DB_PREFIX):
+        try:
+            return jsonify(_db_journey_response(journey_id, station_name, request.args.get('line') or None,
+                                                request.args.get('direction') or None,
+                                                request.args.get('color') or None))
+        except Exception as ex:
+            print(f"[WARN] bahn.de journey: {ex}")
+            return generate_fallback_journey(fallback_line, fallback_direction, fallback_time,
+                                             fallback_delay, station_name)
 
     # Handle mock journeys immediately
     if journey_id.startswith("mock_j_"):
@@ -3350,6 +3371,8 @@ def _fit_stops_to_shape(shape, coords):
 
 
 def _fetch_trip(jid, want_raw=False):
+    if jid and jid.startswith('db|'):
+        return _db_trip(jid)
     now_ts = time.time()
     hit = _trip_cache.get(jid)
     if hit and not want_raw and now_ts - hit[0] < _TRIP_CACHE_TTL:
@@ -4199,6 +4222,581 @@ def push_tick_route():
         'tickGapsMin': gaps[-10:],
         'lastAgents': sorted({a for _, a in _tick_log[-10:]}),
         **(res or {})})
+
+
+# ===========================================================================
+#  FAHRPLAN v2 – bundesweite Daten (bahn.de) + neue Verbindungssuche
+# ===========================================================================
+import dbweb
+from concurrent.futures import ThreadPoolExecutor as _V2Pool, TimeoutError as _V2Timeout
+
+_v2_pool = _V2Pool(max_workers=6)
+DB_PREFIX = 'db|'          # journey ids from bahn.de carry this prefix in the app
+
+GENERIC_PRODUCT_COLORS = {
+    'tram': '#c4372c', 'bus': '#8e3f8d', 'ubahn': '#1c63b7', 'sbahn': '#008d4f',
+    'regional': '#a3242c', 'express': '#ec0016', 'ferry': '#0f7fa8',
+}
+LIGHT_COLORS = {'#F5D300', '#F0A500', '#7FC600', '#E1C700', '#EE9A00', '#73C000'}
+
+
+def _is_magdeburg(*names):
+    return any('magdeburg' in (n or '').lower() for n in names)
+
+
+def _text_color(color):
+    try:
+        c = (color or '').lstrip('#')
+        r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+        return '#111827' if (0.299 * r + 0.587 * g + 0.114 * b) > 170 else '#ffffff'
+    except Exception:
+        return '#ffffff'
+
+
+def _style_line(vm, *stop_names):
+    """App line label, type, colour and operator for a bahn.de verkehrsmittel."""
+    gattung = (vm or {}).get('produktGattung') or ''
+    vtype = dbweb.PRODUCT_TYPE.get(gattung, 'bus')
+    label = dbweb.line_label(vm)
+    operator = dbweb.operator_of(vm)
+    mvb = vtype in ('tram', 'bus') and (_is_magdeburg(*stop_names) or 'magdeburg' in (operator or '').lower())
+    if mvb:
+        name_for_color = ('Str ' if vtype == 'tram' else 'Bus ') + label
+        color = get_line_color(name_for_color, 'MVB')
+        op = operator or 'MVB'
+        if vtype == 'bus':
+            try:
+                if 40 <= int(re.sub(r'\D', '', label) or 0) <= 49:
+                    vtype = 'sev'
+            except ValueError:
+                pass
+    else:
+        color = GENERIC_PRODUCT_COLORS.get(vtype, '#5F7D95')
+        op = operator
+        if vtype == 'regional' and ('odeg' in (op or '').lower() or (op or '').lower().startswith('ostdeutsche eisenbahn')):
+            color = '#2C6930'
+    if vtype == 'tram':
+        app_line = f'Str {label}'
+    elif vtype in ('bus', 'sev'):
+        app_line = f'Bus {label}'
+    else:
+        app_line = label
+    return {'label': label, 'line': app_line, 'type': vtype, 'color': color,
+            'textColor': _text_color(color), 'operator': op, 'mvb': mvb}
+
+
+def _hm(dt):
+    return dt.strftime('%H:%M') if dt else None
+
+
+def _iso(dt):
+    return dt.strftime('%Y-%m-%dT%H:%M:00') if dt else None
+
+
+def _point(planned, realtime, name=None, platform=None, rt_platform=None, cancelled=False):
+    return {
+        'name': name, 'planned': _hm(planned), 'rt': _hm(realtime) if realtime else None,
+        'delay': dbweb.delay_of(planned, realtime), 'iso': _iso(realtime or planned),
+        'plannedIso': _iso(planned), 'platform': platform or None,
+        'rtPlatform': rt_platform if rt_platform and rt_platform != platform else None,
+        'cancelled': bool(cancelled),
+    }
+
+
+def _short_stop(name):
+    n = (name or '').replace('Magdeburg, ', '')
+    return n[:-len(', Magdeburg')] if n.endswith(', Magdeburg') else n
+
+
+# ---------------------------------------------------------------------------
+# bahn.de -> app formats
+# ---------------------------------------------------------------------------
+def _db_connection(v):
+    sections = v.get('verbindungsAbschnitte') or []
+    legs = []
+    for s in sections:
+        vm = s.get('verkehrsmittel') or {}
+        dep_p, dep_r = dbweb.parse_dt((s.get('abfahrt') or {}).get('sollzeit')), dbweb.parse_dt((s.get('abfahrt') or {}).get('echtzeit'))
+        arr_p, arr_r = dbweb.parse_dt((s.get('ankunft') or {}).get('sollzeit')), dbweb.parse_dt((s.get('ankunft') or {}).get('echtzeit'))
+        halte = s.get('halte') or []
+        if vm.get('typ') != 'PUBLICTRANSPORT':
+            legs.append({
+                'kind': 'walk', 'from': _point(dep_p, dep_r, s.get('abfahrtsOrt')),
+                'to': _point(arr_p, arr_r, s.get('ankunftsOrt')),
+                'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
+                'distance': s.get('distanz'),
+            })
+            continue
+        st = _style_line(vm, s.get('abfahrtsOrt'), s.get('ankunftsOrt'))
+        first, last = (halte[0] if halte else {}), (halte[-1] if halte else {})
+        notes = dbweb.notes_of(s)
+        stops = []
+        for h in halte[1:-1]:
+            a_p, a_r = dbweb.parse_dt((h.get('ankunft') or {}).get('sollzeit')), dbweb.parse_dt((h.get('ankunft') or {}).get('echtzeit'))
+            d_p, d_r = dbweb.parse_dt((h.get('abfahrt') or {}).get('sollzeit')), dbweb.parse_dt((h.get('abfahrt') or {}).get('echtzeit'))
+            stops.append({'name': _short_stop(h.get('name')), 'planned': _hm(d_p or a_p),
+                          'rt': _hm(d_r or a_r) if (d_r or a_r) else None,
+                          'delay': dbweb.delay_of(d_p or a_p, d_r or a_r),
+                          'cancelled': bool(h.get('cancelled'))})
+        legs.append({
+            'kind': 'transit', 'src': 'db',
+            'journeyId': DB_PREFIX + s['journeyId'] if s.get('journeyId') else None,
+            'line': st['line'], 'label': st['label'], 'type': st['type'], 'color': st['color'],
+            'textColor': st['textColor'], 'operator': st['operator'], 'mvb': st['mvb'],
+            'direction': vm.get('richtung') or s.get('ankunftsOrt'),
+            'from': _point(dep_p, dep_r, _short_stop(s.get('abfahrtsOrt')), first.get('gleis'), first.get('ezGleis'),
+                           s.get('originCancelled')),
+            'to': _point(arr_p, arr_r, _short_stop(s.get('ankunftsOrt')), last.get('gleis'), last.get('ezGleis'),
+                         s.get('destinationCancelled')),
+            'stops': stops,
+            'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
+            'notes': notes, 'attrs': dbweb.attributes_of(vm),
+            'cancelled': bool(s.get('originCancelled') or s.get('destinationCancelled') or dbweb.is_cancelled_text(notes)),
+        })
+    price = v.get('angebotsPreis') or {}
+    return _finish_connection({
+        'id': v.get('tripId') or v.get('ctxRecon', '')[:40],
+        'source': 'db', 'legs': legs,
+        'price': ({'amount': price.get('betrag'), 'currency': price.get('waehrung') or 'EUR',
+                   'partial': bool(v.get('hasTeilpreis'))} if price.get('betrag') else None),
+        'durationMin': round((v.get('ezVerbindungsDauerInSeconds') or v.get('verbindungsDauerInSeconds') or 0) / 60),
+    })
+
+
+def _finish_connection(c):
+    """Shared post-processing: drop ghost walks, build transfer items, summary fields."""
+    legs = c['legs']
+    # 1) ghost walks (same stop, 0 minutes) disappear
+    cleaned = []
+    for lg in legs:
+        if lg['kind'] == 'walk':
+            same = _norm_station(lg['from']['name']) == _norm_station(lg['to']['name'])
+            if lg.get('durationMin', 0) <= 0 and (same or not lg.get('distance')):
+                continue
+        cleaned.append(lg)
+    legs = cleaned
+    # 2) transfers between two transit legs (walk in between becomes part of the transfer)
+    out, risky, broken = [], False, False
+    i = 0
+    while i < len(legs):
+        lg = legs[i]
+        out.append(lg)
+        if lg['kind'] != 'transit':
+            i += 1
+            continue
+        j, walk = i + 1, None
+        if j < len(legs) and legs[j]['kind'] == 'walk':
+            walk, j = legs[j], j + 1
+        if j < len(legs) and legs[j]['kind'] == 'transit':
+            nxt = legs[j]
+            arr = _parse_iso(lg['to']['iso'])
+            dep = _parse_iso(nxt['from']['iso'])
+            avail = dbweb.minutes_between(arr, dep) if (arr and dep) else None
+            walk_min = walk['durationMin'] if walk else 0
+            buffer = (avail - walk_min) if avail is not None else None
+            p_arr, p_dep = _parse_iso(lg['to']['plannedIso']), _parse_iso(nxt['from']['plannedIso'])
+            p_avail = dbweb.minutes_between(p_arr, p_dep) if (p_arr and p_dep) else None
+            p_buffer = (p_avail - walk_min) if p_avail is not None else None
+            in_station = (walk is None) or not walk.get('distance')
+            tr = {'kind': 'transfer', 'at': nxt['from']['name'], 'fromStop': lg['to']['name'],
+                  'walkMin': walk_min, 'distance': (walk or {}).get('distance') or None,
+                  'inStation': in_station, 'bufferMin': buffer, 'plannedBufferMin': p_buffer,
+                  # HAFAS plans tight transfers on purpose – only warn when real time made it tighter
+                  'risky': buffer is not None and buffer < 2 and p_buffer is not None and buffer != p_buffer,
+                  'broken': buffer is not None and buffer < 0}
+            risky = risky or tr['risky']
+            broken = broken or tr['broken']
+            out.append(tr)
+            i = j
+            continue
+        i += 1
+    c['legs'] = out
+    transit = [l for l in out if l['kind'] == 'transit']
+    timed = [l for l in out if l['kind'] in ('transit', 'walk')]
+    first, last = (timed[0] if timed else None), (timed[-1] if timed else None)
+    c['dep'] = dict(first['from']) if first else None
+    c['arr'] = dict(last['to']) if last else None
+    c['transfers'] = max(0, len(transit) - 1)
+    c['products'] = list(dict.fromkeys(l['type'] for l in transit))
+    c['dticket'] = not any(l['type'] == 'express' for l in transit)
+    c['risky'] = risky
+    c['broken'] = broken
+    c['cancelled'] = any(l.get('cancelled') for l in transit)
+    if c['dticket']:
+        c['price'] = None
+    if first and last and not c.get('durationMin'):
+        a, b = _parse_iso(first['from']['iso']), _parse_iso(last['to']['iso'])
+        c['durationMin'] = dbweb.minutes_between(a, b) or 0
+    c['maxDelay'] = max([abs(l['from']['delay'] or 0) for l in transit] + [abs(l['to']['delay'] or 0) for l in transit] + [0])
+    c['key'] = '|'.join(f"{l['line']}@{l['from']['plannedIso']}" for l in transit)
+    return c
+
+
+def _parse_iso(s):
+    try:
+        return datetime.datetime.strptime(s[:16], '%Y-%m-%dT%H:%M') if s else None
+    except ValueError:
+        return None
+
+
+def _db_departure_item(e, station_name, idx):
+    vm = e.get('verkehrmittel') or e.get('verkehrsmittel') or {}
+    st = _style_line(vm, station_name)
+    planned, realtime = dbweb.parse_dt(e.get('zeit')), dbweb.parse_dt(e.get('ezZeit'))
+    delay = dbweb.delay_of(planned, realtime)
+    texts = [(m.get('text') or '') for m in (e.get('meldungen') or [])]
+    cancelled = bool(e.get('cancelled') or e.get('canceled')) or dbweb.is_cancelled_text(texts)
+    time_str = _hm(planned) or ''
+    jid = DB_PREFIX + e['journeyId'] if e.get('journeyId') else f"mock_j_{st['label']}_{time_str.replace(':', '')}_{idx}"
+    today = datetime.datetime.now(local_tz).date()
+    return {
+        'id': jid, 'journey_id': jid, 'line': st['line'], 'raw_line': st['line'],
+        'direction': (e.get('terminus') or '').replace('Magdeburg, ', ''),
+        'originalDirection': None, 'isDiverted': False, 'diversion': None, 'diversionInfo': None,
+        'time': time_str, 'delay': delay, 'type': st['type'], 'isSEV': st['type'] == 'sev',
+        'sevInfo': 'Schienenersatzverkehr' if st['type'] == 'sev' else None,
+        'day_offset': max(0, (planned.date() - today).days) if planned else 0,
+        'cancelled': cancelled, 'lineColor': st['color'],
+        'realtimeStatus': _realtime_status(delay, cancelled),
+        'estimatedTime': _hm(realtime) if (delay not in (None, 0)) else None,
+        'platform': re.sub(r'^Pos\.\s*', '', e.get('ezGleis') or e.get('gleis') or ''),
+        'operator': st['operator'] if not st['mvb'] else 'MVB',
+        'src': 'db', 'notes': [t for t in texts if t][:2],
+    }
+
+
+def _db_trip(jid, line_hint=None):
+    """bahn.de trip -> same shape as _fetch_trip() (used by reminders and /api/trip)."""
+    raw = dbweb.trip_raw(jid[len(DB_PREFIX):])
+    halte = raw.get('halte') or []
+    now = datetime.datetime.now(local_tz).replace(tzinfo=None)
+    names = [h.get('name') for h in halte]
+    stops = []
+    first_vm = None
+    for h in halte:
+        a_p, a_r = dbweb.parse_dt((h.get('ankunft') or {}).get('sollzeit')), dbweb.parse_dt((h.get('ankunft') or {}).get('echtzeit'))
+        d_p, d_r = dbweb.parse_dt((h.get('abfahrt') or {}).get('sollzeit')), dbweb.parse_dt((h.get('abfahrt') or {}).get('echtzeit'))
+        p, r = d_p or a_p, d_r or a_r
+        ref = r or p
+        stops.append({'name': _short_stop(h.get('name')), 'time': _hm(p) or '', 'rt': _hm(r) if r else None,
+                      'delay': dbweb.delay_of(p, r), 'passed': bool(ref and ref < now),
+                      'platform': h.get('ezGleis') or h.get('gleis') or '',
+                      'cancelled': bool(h.get('cancelled')), 'lat': None, 'lon': None,
+                      'day_offset': max(0, (p.date() - now.date()).days) if p else 0})
+    zug = (raw.get('zugName') or '').strip()
+    kat = ((halte[0].get('kategorie') if halte else '') or zug.split(' ')[0]).upper()
+    gattung = {'STR': 'TRAM', 'BUS': 'BUS', 'U': 'UBAHN', 'S': 'SBAHN', 'ICE': 'ICE', 'IC': 'EC_IC',
+               'EC': 'EC_IC', 'ECE': 'EC_IC', 'IR': 'IR', 'FAE': 'SCHIFF', 'F': 'SCHIFF'}.get(kat, 'REGIONAL')
+    hint = (line_hint or '').strip()
+    num = re.sub(r'^(STR|Str|Bus|BUS|Tram)\s+', '', hint or zug)
+    first_vm = {'name': zug, 'linienNummer': num, 'mittelText': hint or zug, 'produktGattung': gattung,
+                'zugattribute': raw.get('zugattribute') or []}
+    st = _style_line(first_vm, *names)
+    return {'id': jid, 'line': st['line'], 'short': st['label'], 'type': st['type'], 'color': st['color'],
+            'direction': _short_stop(names[-1]) if names else '', 'stops': stops, 'shape': [],
+            'cancelled': bool(raw.get('cancelled')), 'operator': st['operator'],
+            'messages': [m.get('text') for m in (raw.get('priorisierteMeldungen') or []) if m.get('text')][:3]}
+
+
+def _db_journey_response(jid, station_name, line_hint=None, direction_hint=None, color_hint=None):
+    """bahn.de trip -> /api/journey response (same keys as the NASA path)."""
+    trip = _db_trip(jid, line_hint)
+    stops = []
+    vehicle_pos = 0
+    for i, s in enumerate(trip['stops']):
+        delay = s['delay']
+        stops.append({
+            'name': s['name'], 'time': s['time'], 'delay': delay if delay is not None else 0,
+            'hasRealtime': delay is not None, 'passed': s['passed'], 'platform': s['platform'],
+            'cancelled': s['cancelled'], 'day_offset': s['day_offset'],
+            'estimatedTime': s['rt'] if (delay not in (None, 0)) else None,
+            'isVehicleHere': False, 'isRequestStop': False, 'requestStopNote': None,
+        })
+        if s['passed']:
+            vehicle_pos = i
+    if stops:
+        stops[vehicle_pos]['isVehicleHere'] = True
+    total = len(stops)
+    messages = [{'text': t, 'warning': True} for t in trip.get('messages') or []]
+    color = trip['color'] if not color_hint else color_hint
+    return {
+        'line': line_hint or trip['line'], 'direction': direction_hint or trip['direction'],
+        'lineColor': color, 'vehiclePosition': vehicle_pos,
+        'progressPercent': int(vehicle_pos / max(total - 1, 1) * 100) if total else 0,
+        'totalStops': total, 'trip_num': None, 'messages': messages, 'stops': stops,
+        'type': trip['type'], 'isSEV': trip['type'] == 'sev', 'sev_info': None,
+        'operator': trip.get('operator') or ('MVB' if trip['type'] in ('tram', 'bus', 'sev') and _is_magdeburg(station_name) else 'DB'),
+        'source': 'db',
+    }
+
+
+def _db_departures_response(station_id):
+    """Abfahrtstafel für Haltestellen außerhalb des NASA-Netzes (bahn.de)."""
+    lid = dbweb.lid_from_id(station_id)
+    if not lid:
+        return jsonify({"error": "Ungültige Haltestelle"}), 400
+    try:
+        duration = max(15, min(240, int(request.args.get('duration', '60'))))
+    except ValueError:
+        duration = 60
+    try:
+        when = datetime.datetime.strptime(f"{request.args.get('date')} {request.args.get('time')}", '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        when = datetime.datetime.now(local_tz).replace(tzinfo=None, second=0, microsecond=0)
+    name = dbweb.name_from_lid(lid) or request.args.get('station_name', '')
+    try:
+        entries = dbweb.departures_raw(lid, when, duration)
+    except Exception as ex:
+        print(f"[WARN] bahn.de departures: {ex}")
+        return jsonify({"error": "Abfahrten gerade nicht erreichbar"}), 502
+    items = [_db_departure_item(e, name, i) for i, e in enumerate(entries)]
+    items.sort(key=lambda d: (d['day_offset'], d['time']))
+    return jsonify(items)
+
+
+_nasa_station_cache = {}
+
+
+def _nasa_station_for(name):
+    """NASA station id for a stop name (cached)."""
+    key = _norm_station(name)
+    if key in _nasa_station_cache:
+        return _nasa_station_cache[key]
+    sid = None
+    if nasa_client and name:
+        try:
+            q = name if 'magdeburg' in name.lower() else f'Magdeburg, {name}'
+            locs = nasa_client.locations(q) or []
+            sid = locs[0].id if locs else None
+        except Exception as ex:
+            print(f"[WARN] NASA station lookup '{name}': {ex}")
+    _nasa_station_cache[key] = sid
+    return sid
+
+
+def _nasa_match_jid(stop_name, line_label, planned_hhmm, date_str=None):
+    """Find the NASA journey id of an MVB trip (for our own realtime + track view)."""
+    sid = _nasa_station_for(stop_name)
+    if not sid or not planned_hhmm:
+        return None
+    try:
+        day = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else datetime.datetime.now(local_tz).date()
+        h, m = [int(x) for x in planned_hhmm.split(':')[:2]]
+        when = local_tz.localize(datetime.datetime.combine(day, datetime.time(h, m))) - datetime.timedelta(minutes=2)
+        deps = nasa_client.departures(station=sid, date=when, duration=6, max_trips=40) or []
+        want = re.sub(r'\D', '', line_label or '') or (line_label or '').upper()
+        for d in deps:
+            name = normalize_line_name(clean_db_line_name(getattr(d, 'name', '') or ''))
+            got = re.sub(r'\D', '', name) or name.upper()
+            if got == want and d.dateTime and d.dateTime.strftime('%H:%M') == planned_hhmm:
+                return str(d.id)
+    except Exception as ex:
+        print(f"[WARN] NASA match {line_label} {planned_hhmm}: {ex}")
+    return None
+
+
+@app.route('/api/journey/match')
+def journey_match():
+    """For an MVB leg found via bahn.de: return the NASA journey id if we can find it."""
+    jid = _nasa_match_jid(request.args.get('stop', ''), request.args.get('line', ''),
+                          request.args.get('time', ''), request.args.get('date'))
+    return jsonify({'journey_id': jid})
+
+
+# ---------------------------------------------------------------------------
+# NASA (pyhafas) fallback for connections
+# ---------------------------------------------------------------------------
+def _nasa_connections(origin_id, dest_id, when, modes, max_changes, min_change):
+    if not nasa_client:
+        raise RuntimeError('NASA nicht verfügbar')
+    allowed = {k: (k in modes) for k in ('tram', 'bus', 'regional', 'express', 'sbahn')} if modes else \
+        {k: True for k in ('tram', 'bus', 'regional', 'express', 'sbahn')}
+    kwargs = dict(origin=origin_id, destination=dest_id, date=when, max_journeys=6,
+                  products=get_profile_products(nasa_client, allowed))
+    if max_changes is not None and max_changes >= 0:
+        kwargs['max_changes'] = max_changes
+    if min_change:
+        kwargs['min_change_time'] = min_change
+    journeys = nasa_client.journeys(**kwargs) or []
+    out = []
+    for j in journeys:
+        legs = []
+        for leg in j.legs:
+            mode = getattr(getattr(leg, 'mode', None), 'name', '') or ''
+            dep_p = leg.departure.astimezone(local_tz).replace(tzinfo=None) if leg.departure else None
+            arr_p = leg.arrival.astimezone(local_tz).replace(tzinfo=None) if leg.arrival else None
+            dd = leg.departureDelay.total_seconds() / 60 if getattr(leg, 'departureDelay', None) is not None else None
+            ad = leg.arrivalDelay.total_seconds() / 60 if getattr(leg, 'arrivalDelay', None) is not None else None
+            dep_r = dep_p + datetime.timedelta(minutes=dd) if (dep_p and dd is not None) else None
+            arr_r = arr_p + datetime.timedelta(minutes=ad) if (arr_p and ad is not None) else None
+            o_name, d_name = _short_stop(leg.origin.name), _short_stop(leg.destination.name)
+            if mode == 'WALKING' or not leg.name:
+                legs.append({'kind': 'walk', 'from': _point(dep_p, dep_r, o_name), 'to': _point(arr_p, arr_r, d_name),
+                             'durationMin': max(0, dbweb.minutes_between(dep_p, arr_p) or 0),
+                             'distance': getattr(leg, 'distance', None)})
+                continue
+            line_name = clean_db_line_name(leg.name)
+            ltype = classify_line_type(line_name, mode)
+            if ltype == 'walk':
+                ltype = 'bus'
+            color = get_line_color(line_name)
+            label = normalize_line_name(line_name) if ltype in ('tram', 'bus', 'sev') else line_name
+            stops = []
+            for so in (getattr(leg, 'stopovers', None) or [])[1:-1]:
+                sp = so.departure or so.arrival
+                sd = so.departureDelay if so.departure else so.arrivalDelay
+                sp_l = sp.astimezone(local_tz).replace(tzinfo=None) if sp else None
+                sr = sp_l + sd if (sp_l and sd is not None) else None
+                stops.append({'name': _short_stop(so.stop.name), 'planned': _hm(sp_l), 'rt': _hm(sr) if sr else None,
+                              'delay': dbweb.delay_of(sp_l, sr), 'cancelled': bool(getattr(so, 'cancelled', False))})
+            legs.append({
+                'kind': 'transit', 'src': 'nasa', 'journeyId': getattr(leg, 'id', None),
+                'line': (('Str ' if ltype == 'tram' else 'Bus ') + label) if ltype in ('tram', 'bus', 'sev') else line_name,
+                'label': label, 'type': ltype,
+                'color': color, 'textColor': _text_color(color), 'operator': 'MVB' if ltype in ('tram', 'bus', 'sev') else None,
+                'mvb': ltype in ('tram', 'bus', 'sev'), 'direction': _short_stop(getattr(leg, 'direction', None) or d_name),
+                'from': _point(dep_p, dep_r, o_name, getattr(leg, 'departurePlatform', None)),
+                'to': _point(arr_p, arr_r, d_name, getattr(leg, 'arrivalPlatform', None)),
+                'stops': stops, 'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
+                'notes': [], 'attrs': [], 'cancelled': bool(getattr(leg, 'cancelled', False)),
+            })
+        c = _finish_connection({'id': f'nasa-{len(out)}', 'source': 'nasa', 'legs': legs, 'price': None,
+                                'durationMin': int(j.duration.total_seconds() / 60) if j.duration else 0})
+        if modes and any(l['kind'] == 'transit' and l['type'] not in modes and not (l['type'] in ('sev', 'hsb') and ('bus' in modes or 'regional' in modes)) for l in c['legs']):
+            continue
+        out.append(c)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Station resolution between the two worlds
+# ---------------------------------------------------------------------------
+def _db_lid_for(station_id, station_name):
+    lid = dbweb.lid_from_id(station_id) if (station_id or '').startswith('db:') else None
+    if lid:
+        return lid, dbweb.name_from_lid(lid) or station_name
+    name = station_name or station_id
+    if not name or (name.isdigit() and not station_name):
+        return None, station_name
+    best = dbweb.resolve_station(name)
+    return (dbweb.lid_from_id(best['id']), best['name']) if best else (None, station_name)
+
+
+def _nasa_id_for(station_id, station_name):
+    if station_id and not station_id.startswith('db:') and not station_id.startswith('A='):
+        return station_id
+    name = station_name or (dbweb.name_from_lid(dbweb.lid_from_id(station_id) or '') if station_id else None)
+    if not name or not nasa_client:
+        return None
+    try:
+        locs = nasa_client.locations(name) or []
+        return locs[0].id if locs else None
+    except Exception:
+        return None
+
+
+def _parse_modes(raw):
+    if not raw:
+        return None
+    modes = [m for m in raw.split(',') if m in ('tram', 'bus', 'sbahn', 'ubahn', 'regional', 'express', 'ferry')]
+    return modes or None
+
+
+@app.route('/api/routes')
+def api_routes():
+    """
+    Neue Verbindungssuche.
+    from/to: Stations-ID (NASA-ID oder 'db:<lid>') – fromName/toName als Klartext,
+    date=YYYY-MM-DD, time=HH:MM, arrive=1 (Ankunftszeit), modes=tram,bus,…,
+    maxChanges, minChange (Min.), dticket=1, bike=1, page=<Referenz für früher/später>.
+    """
+    a = request.args
+    from_id, to_id = a.get('from', '').strip(), a.get('to', '').strip()
+    from_name, to_name = a.get('fromName', '').strip(), a.get('toName', '').strip()
+    if not (from_id or from_name) or not (to_id or to_name):
+        return jsonify({'error': 'Start und Ziel fehlen'}), 400
+    try:
+        when = datetime.datetime.strptime(f"{a.get('date')} {a.get('time')}", '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        when = datetime.datetime.now(local_tz).replace(tzinfo=None, second=0, microsecond=0)
+    arrive = a.get('arrive') == '1'
+    modes = _parse_modes(a.get('modes'))
+    try:
+        max_changes = int(a.get('maxChanges', '-1'))
+    except ValueError:
+        max_changes = -1
+    try:
+        min_change = max(0, min(30, int(a.get('minChange', '0'))))
+    except ValueError:
+        min_change = 0
+    d_ticket, bike = a.get('dticket') == '1', a.get('bike') == '1'
+    page = a.get('page') or ''
+    errors = []
+
+    # ---- 1) bahn.de (bundesweit, Echtzeit, Preise) ----
+    if not page.startswith('nasa:'):
+        try:
+            fut_from = _v2_pool.submit(_db_lid_for, from_id, from_name)
+            fut_to = _v2_pool.submit(_db_lid_for, to_id, to_name)
+            (f_lid, f_name), (t_lid, t_name) = fut_from.result(timeout=10), fut_to.result(timeout=10)
+            if not f_lid or not t_lid:
+                raise dbweb.DbWebError('Haltestelle bei bahn.de nicht gefunden')
+            raw = dbweb.journeys_raw(f_lid, t_lid, when, arrive=arrive, products=dbweb.products_for(modes),
+                                     max_changes=None if max_changes < 0 else max_changes,
+                                     min_change=min_change or None, d_ticket=d_ticket, bike=bike,
+                                     paging=page[3:] if page.startswith('db:') else None)
+            conns = []
+            for v in raw.get('verbindungen') or []:
+                try:
+                    conns.append(_db_connection(v))
+                except Exception as ex:
+                    print(f"[WARN] route parse: {ex}")
+            ref = raw.get('verbindungReference') or {}
+            if conns or page:
+                return jsonify({
+                    'source': 'db', 'connections': conns,
+                    'earlier': ('db:' + ref['earlier']) if ref.get('earlier') else None,
+                    'later': ('db:' + ref['later']) if ref.get('later') else None,
+                    'from': {'name': f_name}, 'to': {'name': t_name},
+                })
+            errors.append('bahn.de: keine Verbindung')
+        except Exception as ex:
+            print(f"[WARN] routes via bahn.de: {ex}")
+            errors.append(str(ex))
+
+    # ---- 2) Fallback: NASA (Mitteldeutschland) ----
+    try:
+        o_id = _nasa_id_for(from_id, from_name)
+        d_id = _nasa_id_for(to_id, to_name)
+        if not o_id or not d_id:
+            raise RuntimeError('Haltestelle nicht gefunden')
+        search = when
+        if page.startswith('nasa:'):
+            _, direction, iso = page.split(':', 2)
+            search = datetime.datetime.strptime(iso, '%Y-%m-%dT%H%M')
+        fut = _v2_pool.submit(_nasa_connections, o_id, d_id, local_tz.localize(search), modes,
+                              max_changes, min_change)
+        conns = fut.result(timeout=18)
+        if page.startswith('nasa:') and page.split(':')[1] == 'earlier' and conns:
+            # keep only those that leave before the previous first result
+            limit_dt = search + datetime.timedelta(minutes=60)
+            conns = [c for c in conns if _parse_iso(c['dep']['plannedIso']) and _parse_iso(c['dep']['plannedIso']) < limit_dt]
+        first = _parse_iso(conns[0]['dep']['plannedIso']) if conns else None
+        last = _parse_iso(conns[-1]['dep']['plannedIso']) if conns else None
+        return jsonify({
+            'source': 'nasa', 'connections': conns,
+            'earlier': f"nasa:earlier:{(first - datetime.timedelta(minutes=60)).strftime('%Y-%m-%dT%H%M')}" if first else None,
+            'later': f"nasa:later:{(last + datetime.timedelta(minutes=1)).strftime('%Y-%m-%dT%H%M')}" if last else None,
+            'from': {'name': from_name}, 'to': {'name': to_name},
+            'notice': 'Bundesweite Suche gerade nicht erreichbar – Ergebnisse aus dem NASA-Netz (Mitteldeutschland).',
+        })
+    except _V2Timeout:
+        errors.append('NASA: Zeitüberschreitung')
+    except Exception as ex:
+        print(f"[WARN] routes via NASA: {ex}")
+        errors.append(str(ex))
+    return jsonify({'error': 'Verbindungssuche gerade nicht möglich. Bitte gleich nochmal versuchen.',
+                    'details': errors[:3]}), 502
 
 
 if __name__ == '__main__':
