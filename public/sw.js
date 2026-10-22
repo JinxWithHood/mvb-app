@@ -2,7 +2,7 @@
 // - network-first for the app shell (updates arrive immediately)
 // - cache-first for images/fonts, never caches live API data
 // - Web Push: shows notifications from the server, opens the right tab on tap
-const CACHE_NAME = 'mvb-magdeburg-cache-v8-3';
+const CACHE_NAME = 'mvb-magdeburg-cache-v8-4';
 const CORE_URLS = [
   '/',
   '/index.html',
@@ -13,6 +13,7 @@ const CORE_URLS = [
   '/jinx-fx.js',
   '/live-map.js',
   '/season.js',
+  '/maintenance.js',
   '/manifest.json',
   '/assets/icon.svg',
   '/assets/icon-192.png',
@@ -45,8 +46,8 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(req.url);
 
-  // Live data: always network, never cached
-  if (url.pathname.includes('/api/')) return;
+  // Live data and the admin area: always network, never cached
+  if (url.pathname.includes('/api/') || url.pathname.startsWith('/admin')) return;
 
   const isStatic = /\.(png|jpe?g|svg|webp|gif|woff2?)$/i.test(url.pathname) || url.hostname.includes('fonts.g');
 

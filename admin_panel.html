@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin · Magdeburg Mobil</title>
+<link rel="icon" href="/assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #070b09; --card: #111a15; --card2: #16211b; --line: rgba(255,255,255,.08); --text: #eef4f0; --muted: #8fa198; --green: #12b366; --green-d: #018e4a; --mint: #7ff0b0; --amber: #fbbf24; --red: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1200px 500px at 10% -10%, #0e3a24 0%, transparent 60%), var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; }
+  button, input, select, textarea { font-family: inherit; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 6px 0 22px; flex-wrap: wrap; }
+  header img { width: 42px; height: 42px; border-radius: 12px; }
+  header .t { display: flex; flex-direction: column; }
+  header .t span { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--green); }
+  header .t strong { font-size: 20px; letter-spacing: -.02em; }
+  header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pill { padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; font-weight: 700; color: var(--muted); }
+  .btn { height: 42px; padding: 0 16px; border-radius: 12px; border: 1.5px solid var(--line); background: transparent; color: var(--text); font-weight: 700; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
+  .btn:hover { border-color: var(--green); }
+  .btn.primary { background: linear-gradient(180deg, var(--green), var(--green-d)); border-color: transparent; color: #fff; }
+  .btn.danger { border-color: rgba(255,107,107,.45); color: var(--red); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+  .stat small { display: block; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .stat b { display: block; font-size: 26px; letter-spacing: -.02em; margin-top: 4px; }
+  .stat b.ok { color: var(--mint); } .stat b.warn { color: var(--amber); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px; }
+  .card + .card { margin-top: 18px; }
+  .card h2 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+  .card p.d { margin: 0 0 14px; color: var(--muted); font-size: 13.5px; }
+  label.l { display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 7px; }
+  label.l em { font-style: normal; letter-spacing: 0; text-transform: none; font-weight: 600; }
+  input[type=text], input[type=time], select, textarea { width: 100%; padding: 12px 14px; border-radius: 13px; border: 1.5px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); font-size: 15px; font-weight: 500; outline: none; }
+  textarea { min-height: 86px; resize: vertical; line-height: 1.4; }
+  input:focus, select:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 4px rgba(18,179,102,.18); }
+  select option { background: #111a15; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; border-radius: 13px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+  .seg button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-weight: 700; font-size: 13.5px; cursor: pointer; }
+  .seg button.on { background: var(--green); color: #fff; }
+  .seg.maint button.on[data-v=banner] { background: var(--amber); color: #1a1205; }
+  .seg.maint button.on[data-v=lock] { background: var(--red); color: #1a0505; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1 1 160px; }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--line); }
+  .switch span b { display: block; font-size: 14.5px; } .switch span small { color: var(--muted); font-size: 12.5px; }
+  .switch input { appearance: none; -webkit-appearance: none; width: 48px; height: 28px; border-radius: 999px; background: rgba(128,128,128,.4); position: relative; cursor: pointer; flex: none; }
+  .switch input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch input:checked { background: var(--red); } .switch input:checked::after { transform: translateX(20px); }
+  .preview { margin-top: 16px; border-radius: 18px; background: #e9ecea; color: #111; padding: 12px 14px; display: flex; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+  .preview img { width: 38px; height: 38px; border-radius: 9px; flex: none; }
+  .preview .pt { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 2px; }
+  .preview b { display: block; font-size: 14.5px; } .preview p { margin: 2px 0 0; font-size: 13.5px; color: #333; white-space: pre-wrap; word-break: break-word; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .result { margin-top: 12px; font-size: 14px; font-weight: 600; min-height: 20px; }
+  .result.ok { color: var(--mint); } .result.err { color: var(--red); }
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+  .status.off { background: rgba(18,179,102,.14); color: var(--mint); }
+  .status.banner { background: rgba(251,191,36,.16); color: var(--amber); }
+  .status.lock { background: rgba(255,107,107,.16); color: var(--red); }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 11px 13px; border-radius: 14px; background: var(--card2); border: 1px solid var(--line); }
+  .item b { font-size: 14px; } .item small { color: var(--muted); font-size: 12.5px; }
+  .item .meta { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+  .item .x { align-self: center; height: 32px; padding: 0 10px; font-size: 12.5px; }
+  .chip { display: inline-block; padding: 1px 7px; margin: 0 3px 3px 0; border-radius: 6px; background: rgba(255,255,255,.08); font-size: 11.5px; font-weight: 700; }
+  .empty { color: var(--muted); font-size: 13.5px; padding: 8px 2px; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1d2a23; border: 1px solid var(--line); padding: 12px 16px; border-radius: 14px; font-weight: 700; font-size: 14px; box-shadow: 0 20px 40px rgba(0,0,0,.5); opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/assets/icon-192.png" alt="">
+    <div class="t"><span>Leitstelle</span><strong>Magdeburg Mobil Admin</strong></div>
+    <div class="right">
+      <span class="pill" id="who">…</span>
+      <a class="btn" href="/" target="_blank" rel="noopener">App öffnen</a>
+      <button class="btn" id="logoutBtn" type="button">Abmelden</button>
+    </div>
+  </header>
+
+  <section class="stats" aria-label="Übersicht">
+    <div class="stat"><small>Geräte mit Push</small><b id="sDevices">–</b></div>
+    <div class="stat"><small>Server läuft seit</small><b id="sUptime">–</b></div>
+    <div class="stat"><small>Letzter Wachhalter-Ping</small><b id="sPing">–</b></div>
+    <div class="stat"><small>Speicher</small><b id="sStorage">–</b></div>
+  </section>
+
+  <div class="grid">
+    <div>
+      <section class="card" aria-labelledby="pushTitle">
+        <h2 id="pushTitle">📢 Push-Nachricht senden</h2>
+        <p class="d">Geht an alle, die in der App Push eingeschaltet haben.</p>
+
+        <label class="l" for="pTitle">Titel <em id="cTitle">0/80</em></label>
+        <input type="text" id="pTitle" maxlength="80" placeholder="z. B. Morgen Streik bei der MVB 🚨">
+        <label class="l" for="pBody">Text <em id="cBody">0/300</em></label>
+        <textarea id="pBody" maxlength="300" placeholder="Was sollen alle wissen?"></textarea>
+
+        <div class="row">
+          <div>
+            <label class="l" for="pUrl">Beim Antippen öffnen</label>
+            <select id="pUrl">
+              <option value="/">Startseite</option>
+              <option value="/?tab=alerts">Meldungen</option>
+              <option value="/?tab=departures">Abfahrten</option>
+              <option value="/?tab=map">Live-Karte</option>
+              <option value="/?tab=news">Aktuelles</option>
+              <option value="/?tab=tickets">Tickets</option>
+            </select>
+          </div>
+          <div>
+            <label class="l">Empfänger</label>
+            <div class="seg" id="targetSeg">
+              <button type="button" data-v="all" class="on">Alle</button>
+              <button type="button" data-v="lines">Linien</button>
+              <button type="button" data-v="me">Nur ich</button>
+            </div>
+          </div>
+        </div>
+        <div id="linesWrap" hidden>
+          <label class="l" for="pLines">Linien <em>an alle mit diesen Favoriten-Linien</em></label>
+          <input type="text" id="pLines" placeholder="z. B. 1, 4, 52">
+        </div>
+        <p class="d" id="meHint" hidden style="margin-top:10px"></p>
+
+        <label class="switch"><span><b>Dringend</b><small>Kommt auch in den Ruhezeiten der Nutzer an und bleibt stehen</small></span><input type="checkbox" id="pUrgent"></label>
+
+        <div class="preview" aria-label="Vorschau">
+          <img src="/assets/icon-192.png" alt="">
+          <div style="min-width:0;flex:1">
+            <div class="pt"><span>Magdeburg Mobil</span><span>jetzt</span></div>
+            <b id="vTitle">Titel deiner Nachricht</b>
+            <p id="vBody">Hier steht der Text.</p>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" id="sendBtn" type="button">Senden</button>
+        </div>
+        <div class="result" id="pushResult" role="status"></div>
+      </section>
+
+      <section class="card" aria-labelledby="histTitle">
+        <h2 id="histTitle">🕓 Verlauf</h2>
+        <div class="list" id="history"></div>
+      </section>
+    </div>
+
+    <div>
+      <section class="card" aria-labelledby="maintTitle">
+        <h2 id="maintTitle">🛠️ Wartungsmodus <span class="status off" id="maintStatus">Aus</span></h2>
+        <p class="d">Ping, Push-Erinnerungen und dieser Admin-Bereich laufen immer weiter.</p>
+        <div class="seg maint" id="maintSeg">
+          <button type="button" data-v="off" class="on">Aus</button>
+          <button type="button" data-v="banner">Hinweis-Banner</button>
+          <button type="button" data-v="lock">Komplett gesperrt</button>
+        </div>
+        <label class="l" for="mMsg">Nachricht an die Nutzer</label>
+        <textarea id="mMsg" maxlength="240" placeholder="z. B. Wir bauen gerade was Neues ein. Gleich geht's weiter!"></textarea>
+        <div class="row">
+          <div>
+            <label class="l" for="mUntil">Voraussichtlich zurück um</label>
+            <input type="time" id="mUntil">
+          </div>
+          <div>
+            <label class="l" for="mAuto">Automatisch beenden</label>
+            <select id="mAuto">
+              <option value="0">nein</option>
+              <option value="15">nach 15 Min</option>
+              <option value="30">nach 30 Min</option>
+              <option value="60">nach 1 Std</option>
+              <option value="120">nach 2 Std</option>
+              <option value="240">nach 4 Std</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="maintBtn" type="button">Übernehmen</button>
+        </div>
+        <div class="result" id="maintResult" role="status"></div>
+      </section>
+
+      <section class="card" aria-labelledby="devTitle">
+        <h2 id="devTitle">📱 Geräte mit Push</h2>
+        <p class="d">Anonym – nur Gerätetyp, Favoriten und letzter Kontakt.</p>
+        <div class="list" id="devices"></div>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function () {
+  'use strict';
+  let csrf = '';
+  let target = 'all';
+  let maintMode = 'off';
+  let myEndpoint = null;
+  let data = null;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  async function api(path, body) {
+    const opts = { credentials: 'same-origin', headers: {} };
+    if (body !== undefined) {
+      opts.method = 'POST';
+      opts.headers['Content-Type'] = 'application/json';
+      opts.headers['X-CSRF-Token'] = csrf;
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(path, opts);
+    if (res.status === 401) { location.reload(); throw new Error('Abgemeldet'); }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || ('Fehler ' + res.status));
+    return json;
+  }
+
+  function fmtAgo(ts) {
+    if (!ts) return '–';
+    const m = Math.round((Date.now() / 1000 - ts) / 60);
+    if (m < 1) return 'gerade eben';
+    if (m < 60) return `vor ${m} Min`;
+    const h = Math.round(m / 60);
+    if (h < 48) return `vor ${h} Std`;
+    return `vor ${Math.round(h / 24)} Tagen`;
+  }
+
+  function fmtUptime(min) {
+    if (min == null) return '–';
+    if (min < 60) return `${Math.round(min)} Min`;
+    const h = Math.floor(min / 60);
+    return h < 48 ? `${h} Std ${Math.round(min % 60)} Min` : `${Math.round(h / 24)} Tage`;
+  }
+
+  function render() {
+    $('who').textContent = '👤 ' + data.user;
+    $('sDevices').textContent = data.devices.length;
+    $('sUptime').textContent = fmtUptime(data.server.uptimeMin);
+    const ping = data.server.lastPingMinAgo;
+    const sp = $('sPing');
+    sp.textContent = ping == null ? 'noch keiner' : (ping < 1 ? 'gerade eben' : `vor ${Math.round(ping)} Min`);
+    sp.className = ping != null && ping <= 15 ? 'ok' : 'warn';
+    const st = $('sStorage');
+    st.textContent = data.server.storage === 'upstash' ? 'Upstash ✓' : 'temporär';
+    st.className = data.server.storage === 'upstash' ? 'ok' : 'warn';
+
+    const devs = $('devices');
+    devs.innerHTML = '';
+    if (!data.devices.length) devs.innerHTML = '<div class="empty">Noch kein Gerät hat Push eingeschaltet.</div>';
+    data.devices.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      const lines = (d.lines || []).map(l => `<span class="chip">${esc(l)}</span>`).join('') || '<small>keine Favoriten</small>';
+      el.innerHTML = `<div><b>${esc(d.ua)}${myEndpoint && d.mine ? ' · du' : ''}</b><br><small>aktiv ${esc(fmtAgo(d.seen))} · seit ${esc(fmtAgo(d.created))}</small></div>
+        <button class="btn x" type="button">Test senden</button>
+        <div class="meta">${lines}${d.reminders ? ` · ⏰ ${d.reminders} Wecker` : ''}${d.quiet ? ` · 🌙 ${esc(d.quiet[0])}–${esc(d.quiet[1])} Uhr` : ''}</div>`;
+      el.querySelector('.x').addEventListener('click', () => sendTest(d.key));
+      devs.appendChild(el);
+    });
+
+    const hist = $('history');
+    hist.innerHTML = '';
+    if (!data.history.length) hist.innerHTML = '<div class="empty">Noch keine Nachricht verschickt.</div>';
+    data.history.forEach(h => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      const who = h.target === 'lines' ? `Linien ${esc((h.lines || []).join(', '))}` : h.target === 'device' ? 'ein Gerät' : 'alle';
+      el.innerHTML = `<div><b>${esc(h.title)}</b><br><small>${esc(h.body)}</small></div>
+        <small>${esc(new Date(h.ts * 1000).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</small>
+        <div class="meta">an ${who}${h.urgent ? ' · dringend' : ''} · ✅ ${h.sent || 0} angekommen${h.failed ? ` · ❌ ${h.failed} Fehler` : ''}${h.removed ? ` · 🗑️ ${h.removed} abgelaufen` : ''}${h.quiet ? ` · 🌙 ${h.quiet} in Ruhezeit` : ''}</div>`;
+      hist.appendChild(el);
+    });
+
+    const m = data.maintenance || { mode: 'off' };
+    const ms = $('maintStatus');
+    ms.className = 'status ' + (m.mode || 'off');
+    let txt = m.mode === 'lock' ? 'Gesperrt' : m.mode === 'banner' ? 'Banner aktiv' : 'Aus';
+    if (m.endsAt) txt += ` · endet ${new Date(m.endsAt * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+    ms.textContent = txt;
+    if (!render.maintInit) {
+      setMaintMode(m.mode || 'off');
+      $('mMsg').value = m.message || '';
+      $('mUntil').value = m.until || '';
+      render.maintInit = true;
+    }
+  }
+
+  async function load() {
+    try {
+      data = await api('/api/admin/overview');
+      csrf = data.csrf;
+      render();
+    } catch (e) {
+      if (e.message !== 'Abgemeldet') toast(e.message);
+    }
+  }
+
+  function setTarget(v) {
+    target = v;
+    document.querySelectorAll('#targetSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    $('linesWrap').hidden = v !== 'lines';
+    const hint = $('meHint');
+    hint.hidden = v !== 'me';
+    if (v === 'me') hint.textContent = myEndpoint ? 'Geht nur an diesen Browser – perfekt zum Testen.' : 'In diesem Browser ist Push noch nicht an. Öffne die App, schalte Push ein und lade diese Seite neu – oder nimm unten „Test senden“ bei einem Gerät.';
+    $('sendBtn').textContent = v === 'me' ? 'Test an mich senden' : 'Senden';
+  }
+
+  function setMaintMode(v) {
+    maintMode = v;
+    document.querySelectorAll('#maintSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  }
+
+  function updatePreview() {
+    const t = $('pTitle').value.trim(), b = $('pBody').value.trim();
+    $('vTitle').textContent = t || 'Titel deiner Nachricht';
+    $('vBody').textContent = b || 'Hier steht der Text.';
+    $('cTitle').textContent = `${$('pTitle').value.length}/80`;
+    $('cBody').textContent = `${$('pBody').value.length}/300`;
+  }
+
+  async function send(body) {
+    const r = $('pushResult');
+    r.className = 'result';
+    r.textContent = 'Sende…';
+    $('sendBtn').disabled = true;
+    try {
+      const res = await api('/api/admin/push', body);
+      r.className = 'result ok';
+      r.textContent = `✅ ${res.sent} von ${res.total} angekommen` + (res.quiet ? ` · ${res.quiet} in Ruhezeit übersprungen` : '') + (res.removed ? ` · ${res.removed} abgelaufene Abos entfernt` : '') + (res.failed ? ` · ${res.failed} Fehler` : '');
+      load();
+    } catch (e) {
+      r.className = 'result err';
+      r.textContent = e.message;
+    } finally {
+      $('sendBtn').disabled = false;
+    }
+  }
+
+  function payloadBase() {
+    return { title: $('pTitle').value.trim(), body: $('pBody').value.trim(), url: $('pUrl').value, urgent: $('pUrgent').checked };
+  }
+
+  function sendTest(deviceKey) {
+    const p = payloadBase();
+    if (!p.title) p.title = '🔔 Test aus der Leitstelle';
+    if (!p.body) p.body = 'Wenn du das liest, kommen Admin-Nachrichten an. 💥';
+    send({ ...p, target: 'device', deviceKey });
+  }
+
+  $('sendBtn').addEventListener('click', () => {
+    const p = payloadBase();
+    if (target === 'me') {
+      if (!myEndpoint) { toast('In diesem Browser ist Push nicht aktiv'); return; }
+      if (!p.title) p.title = '🔔 Test aus der Leitstelle';
+      if (!p.body) p.body = 'Wenn du das liest, kommen Admin-Nachrichten an. 💥';
+      send({ ...p, target: 'device', endpoint: myEndpoint });
+      return;
+    }
+    if (!p.title || !p.body) { toast('Titel und Text fehlen'); return; }
+    let lines = [];
+    let count = data ? data.devices.length : 0;
+    if (target === 'lines') {
+      lines = $('pLines').value.split(/[\s,;]+/).map(s => s.replace(/\D/g, '')).filter(Boolean);
+      if (!lines.length) { toast('Welche Linien?'); return; }
+      count = data ? data.devices.filter(d => (d.lines || []).some(l => lines.includes(String(l)))).length : 0;
+    }
+    if (!confirm(`Nachricht „${p.title}“ an ${count} Gerät${count === 1 ? '' : 'e'} senden?`)) return;
+    send({ ...p, target, lines });
+  });
+
+  $('maintBtn').addEventListener('click', async () => {
+    const r = $('maintResult');
+    if (maintMode === 'lock' && !confirm('Die App wirklich für alle sperren? (Du selbst kommst als Admin weiter rein.)')) return;
+    r.className = 'result';
+    r.textContent = 'Speichere…';
+    try {
+      const res = await api('/api/admin/maintenance', { mode: maintMode, message: $('mMsg').value.trim(), until: $('mUntil').value, autoOffMinutes: parseInt($('mAuto').value, 10) || 0 });
+      data.maintenance = res.maintenance;
+      render();
+      r.className = 'result ok';
+      r.textContent = maintMode === 'off' ? '✅ Wartungsmodus ist aus.' : maintMode === 'lock' ? '🔒 App ist gesperrt. Nutzer sehen spätestens in 1–2 Minuten den Wartungsbildschirm.' : '📣 Banner ist aktiv.';
+    } catch (e) {
+      r.className = 'result err';
+      r.textContent = e.message;
+    }
+  });
+
+  document.querySelectorAll('#targetSeg button').forEach(b => b.addEventListener('click', () => setTarget(b.dataset.v)));
+  document.querySelectorAll('#maintSeg button').forEach(b => b.addEventListener('click', () => setMaintMode(b.dataset.v)));
+  ['pTitle', 'pBody'].forEach(id => $(id).addEventListener('input', updatePreview));
+  $('logoutBtn').addEventListener('click', async () => {
+    try { await api('/admin/panel/logout', {}); } catch (e) { /* ignore */ }
+    location.replace('/');
+  });
+
+  (async () => {
+    try {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const reg = await navigator.serviceWorker.getRegistration('/');
+        const sub = reg && await reg.pushManager.getSubscription();
+        if (sub) myEndpoint = sub.endpoint;
+      }
+    } catch (e) { /* no push here */ }
+    setTarget('all');
+    updatePreview();
+    await load();
+    setInterval(load, 30000);
+  })();
+})();
+</script>
+</body>
+</html>

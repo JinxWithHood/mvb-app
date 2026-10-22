@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin-Login · Magdeburg Mobil</title>
+<link rel="icon" href="/assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #070b09; --card: #111a15; --line: rgba(255,255,255,.08); --text: #eef4f0; --muted: #8fa198; --green: #12b366; --green-d: #018e4a; --red: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: radial-gradient(1200px 600px at 20% -10%, #0e3a24 0%, transparent 60%), var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .card { width: min(420px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px; box-shadow: 0 30px 60px -20px rgba(0,0,0,.7); }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .brand img { width: 44px; height: 44px; border-radius: 12px; }
+  .brand strong { display: block; font-size: 18px; }
+  .brand span { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--green); }
+  h1 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 6px; }
+  p.sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
+  label { display: block; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 7px; }
+  .field { position: relative; }
+  input { width: 100%; height: 50px; padding: 0 14px; border-radius: 14px; border: 1.5px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); font: 600 16px 'Inter', sans-serif; outline: none; }
+  input:focus { border-color: var(--green); box-shadow: 0 0 0 4px rgba(18,179,102,.2); }
+  .toggle { position: absolute; right: 8px; top: 8px; height: 34px; padding: 0 10px; border-radius: 10px; border: 0; background: rgba(255,255,255,.06); color: var(--muted); font: 700 12px 'Inter', sans-serif; cursor: pointer; }
+  button.go { width: 100%; height: 52px; margin-top: 22px; border: 0; border-radius: 14px; background: linear-gradient(180deg, var(--green), var(--green-d)); color: #fff; font: 800 16px 'Inter', sans-serif; cursor: pointer; }
+  button.go:disabled { opacity: .6; cursor: progress; }
+  .err { min-height: 20px; margin-top: 12px; color: var(--red); font-size: 14px; font-weight: 600; }
+  .foot { margin-top: 18px; font-size: 12px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<form class="card" id="loginForm" autocomplete="on">
+  <div class="brand">
+    <img src="/assets/icon-192.png" alt="">
+    <div><span>Admin</span><strong>Magdeburg Mobil</strong></div>
+  </div>
+  <h1>Anmelden</h1>
+  <p class="sub">Nur für die Leitstelle. 🚋</p>
+  <label for="user">Benutzername</label>
+  <input id="user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+  <label for="pw">Passwort</label>
+  <div class="field">
+    <input id="pw" name="password" type="password" autocomplete="current-password" required>
+    <button type="button" class="toggle" id="togglePw" aria-label="Passwort anzeigen">Zeigen</button>
+  </div>
+  <button class="go" id="goBtn" type="submit">Einloggen</button>
+  <div class="err" id="err" role="alert"></div>
+  <div class="foot">Sitzung bleibt 12 Stunden aktiv.</div>
+</form>
+<script>
+(function () {
+  const form = document.getElementById('loginForm');
+  const err = document.getElementById('err');
+  const btn = document.getElementById('goBtn');
+  const pw = document.getElementById('pw');
+  document.getElementById('togglePw').addEventListener('click', (e) => {
+    const show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    e.currentTarget.textContent = show ? 'Verbergen' : 'Zeigen';
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Prüfe…';
+    try {
+      const res = await fetch(location.pathname, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: document.getElementById('user').value, password: pw.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) { location.replace(data.next || '/admin/panel'); return; }
+      err.textContent = data.error || 'Login fehlgeschlagen.';
+      pw.value = '';
+      pw.focus();
+    } catch (ex) {
+      err.textContent = 'Server nicht erreichbar.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Einloggen';
+    }
+  });
+  document.getElementById('user').focus();
+})();
+</script>
+</body>
+</html>
