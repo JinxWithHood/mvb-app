@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const target = card.getAttribute('data-target');
             switchTab(target);
             if (target === 'departures') {
+                setPlanView('board');
                 fetchDepartures();
                 scrollToResults();
             } else if (target === 'connections') {
@@ -132,12 +133,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     // State Management
     // -----------------------------------------------------------------------
-    const savedSettings = (() => {
-        try { return JSON.parse(localStorage.getItem('mvb_settings_v1') || '{}') || {}; } catch (e) { return {}; }
+    let currentStation = { id: '7393', name: 'Magdeburg, Hauptbahnhof/Willy-Brandt-Platz' };
+    let currentPlanView = (() => {
+        try { return localStorage.getItem('mvb_plan_mode') === 'routes' ? 'routes' : 'board'; } catch (e) { return 'board'; }
     })();
-    let currentStation = (savedSettings.homeStation && savedSettings.homeStation.id)
-        ? savedSettings.homeStation
-        : { id: '7393', name: 'Magdeburg, Hauptbahnhof/Willy-Brandt-Platz' };
     
     let activeFilters = {
         all: true,
@@ -192,8 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const depDuration = document.getElementById('depDuration');
     const nowBtn = document.getElementById('nowBtn');
     const submitDepBtn = document.getElementById('submitDepBtn');
-    if (stationInput && currentStation) stationInput.value = currentStation.name;
-    if (depDuration && [30, 60, 120, 240].includes(Number(savedSettings.boardDuration))) depDuration.value = String(savedSettings.boardDuration);
 
     const swapBtn = document.getElementById('swapBtn');
     const destInput = document.getElementById('destInput');
@@ -893,14 +890,14 @@ document.addEventListener('DOMContentLoaded', () => {
             sub: 'Live-Abfahrten, Verbindungen und Störungen für Magdeburg — werbefrei und in Echtzeit.'
         }),
         departures: () => ({
-            eyebrow: 'Fahrplan',
-            title: 'Wohin geht\'s?',
-            sub: 'Nur „Von“ zeigt die Abfahrten. Mit Ziel bekommst du Verbindungen – in Magdeburg und ganz Deutschland, live.'
+            eyebrow: 'Live-Abfahrtstafel',
+            title: 'Abfahrten',
+            sub: 'Echtzeit-Abfahrten mit Verspätungen, Ausfällen und Live-Position der Fahrzeuge – in Magdeburg und ganz Deutschland.'
         }),
         connections: () => ({
             eyebrow: 'Routenplaner',
             title: 'Verbindung suchen',
-            sub: 'Von A nach B mit Tram, Bus und Bahn — inklusive Umstiege und Live-Verlauf.'
+            sub: 'Von A nach B mit Tram, Bus und Bahn – deutschlandweit, mit Umstiegen, Preisen und Live-Verlauf.'
         })
     };
 
@@ -929,26 +926,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // Synchronized Tab Navigation (Desktop Header Menu + Mobile Bottom Tab Nav)
     // -----------------------------------------------------------------------
     function setPlanView(view) {
+        view = view === 'routes' ? 'routes' : 'board';
+        currentPlanView = view;
+        try { localStorage.setItem('mvb_plan_mode', view); } catch (e) {}
         const board = document.getElementById('planBoard');
         const routes = document.getElementById('planRoutes');
-        if (!board || !routes) return;
         const isRoutes = view === 'routes';
-        board.hidden = isRoutes;
-        routes.hidden = !isRoutes;
-        document.querySelectorAll('.plan-switch-btn').forEach(b => {
-            const on = b.getAttribute('data-planview') === view;
+        if (board) board.hidden = isRoutes;
+        if (routes) routes.hidden = !isRoutes;
+        if (formDepartures) formDepartures.setAttribute('data-mode', view);
+        document.querySelectorAll('.plan-mode-btn').forEach(b => {
+            const on = b.getAttribute('data-planmode') === view;
             b.classList.toggle('active', on);
             b.setAttribute('aria-selected', on ? 'true' : 'false');
         });
+        const label = document.getElementById('submitLabel');
+        if (label) label.textContent = isRoutes ? 'Verbindungen suchen' : 'Abfahrten zeigen';
+        if (stationInput) stationInput.placeholder = isRoutes ? 'Start: Haltestelle oder Adresse…' : 'Haltestelle eingeben…';
         appContainer.setAttribute('data-planview', view);
+        if (appContainer.getAttribute('data-view') === 'departures') updateHeroTexts(isRoutes ? 'connections' : 'departures');
         if (window.MVBRoutes) window.MVBRoutes.onViewChange(view);
     }
-    document.querySelectorAll('.plan-switch-btn').forEach(b => {
+    document.querySelectorAll('.plan-mode-btn').forEach(b => {
         b.addEventListener('click', () => {
-            const view = b.getAttribute('data-planview');
+            const view = b.getAttribute('data-planmode');
+            if (view === currentPlanView) return;
             setPlanView(view);
-            if (view === 'routes' && destInput && !destInput.value.trim()) destInput.focus();
-            if (view === 'board' && !departuresCache.length) fetchDepartures();
+            if (view === 'routes' && destInput && !destInput.value.trim()) setTimeout(() => destInput.focus(), 60);
+            if (view === 'board' && currentStation && currentStation.kind !== 'address') fetchDepartures();
         });
     });
 
@@ -962,7 +967,7 @@ document.addEventListener('DOMContentLoaded', () => {
             connectionStopsInterval = null;
         }
         appContainer.setAttribute('data-view', targetTabId);
-        updateHeroTexts(targetTabId);
+        updateHeroTexts(targetTabId === 'departures' && currentPlanView === 'routes' ? 'connections' : targetTabId);
 
         // Live map: only poll while visible
         if (window.LiveMap) {
@@ -1223,6 +1228,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupAutocomplete(stationInput, stationSuggestions, clearStationBtn, (station) => {
         currentStation = station;
+        if (currentPlanView === 'routes' && destInput && !destInput.value.trim()) {
+            destInput.focus();
+            return;
+        }
         submitDepBtn.click();
     }, () => submitDepBtn.click());
 
@@ -1677,9 +1686,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         rememberStation(currentStation);
         switchTab('departures');
-        if (window.MVBRoutes && window.MVBRoutes.hasDestination()) {
+        if (currentPlanView === 'routes') {
             setPlanView('routes');
-            window.MVBRoutes.search();
+            if (!destInput.value.trim()) {
+                showToast('Wohin soll\'s gehen? Trag bei „Nach“ ein Ziel ein', 'info');
+                destInput.focus();
+                return;
+            }
+            if (window.MVBRoutes) window.MVBRoutes.search();
             scrollToResults();
             return;
         }
@@ -1744,6 +1758,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentStation = { id: st.id, name: st.name, kind: st.kind };
                 stationInput.value = st.name;
                 if (clearStationBtn) clearStationBtn.hidden = false;
+                if (currentPlanView === 'routes' && destInput && !destInput.value.trim()) { destInput.focus(); return; }
                 submitDepBtn.click();
             });
             wrap.appendChild(btn);
@@ -1795,7 +1810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!anchorEl) return;
         let host = anchorEl.previousElementSibling && anchorEl.previousElementSibling.classList.contains('trip-leg-switch')
             ? anchorEl.previousElementSibling : null;
-        if (!dep.tripLegs || dep.tripLegs.length < 2) {
+        if (!dep.tripLegs || !dep.tripLegs.length) {
             if (host) host.remove();
             return;
         }
@@ -1807,6 +1822,14 @@ document.addEventListener('DOMContentLoaded', () => {
             anchorEl.parentNode.insertBefore(host, anchorEl);
         }
         host.innerHTML = '';
+        if (dep.tripConn && window.MVBRoutes) {
+            const back = document.createElement('button');
+            back.type = 'button';
+            back.className = 'trip-leg-chip back';
+            back.innerHTML = '<svg class="ico" aria-hidden="true"><use href="#i-arrow-left"/></svg><span>Ganze Fahrt</span>';
+            back.addEventListener('click', () => window.MVBRoutes.followTrip(dep.tripConn));
+            host.appendChild(back);
+        }
         dep.tripLegs.forEach((leg, i) => {
             const b = document.createElement('button');
             b.type = 'button';
@@ -1850,6 +1873,190 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (i > bi && i < end) r.classList.add('trip-ride');
             else r.classList.add('trip-outside');
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // Whole-journey view ("Fahrt verfolgen"): boarding stop → stops → walk → next vehicle …
+    // -----------------------------------------------------------------------
+    function fmtTripDur(min) {
+        min = Math.max(0, Math.round(min || 0));
+        if (min < 60) return `${min} Min`;
+        return `${Math.floor(min / 60)} Std${min % 60 ? ' ' + (min % 60) + ' Min' : ''}`;
+    }
+
+    function isoMs(iso) {
+        const t = iso ? new Date(iso).getTime() : NaN;
+        return isNaN(t) ? null : t;
+    }
+
+    function tripLegData(leg) {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const startDay = leg.from.plannedIso ? new Date(leg.from.plannedIso.slice(0, 10) + 'T00:00:00') : today;
+        let dayOffset = Math.max(0, Math.round((startDay - today) / 86400000));
+        let prev = null;
+        const pts = [
+            { name: leg.from.name, time: leg.from.planned, delay: leg.from.delay, platform: leg.from.rtPlatform || leg.from.platform, cancelled: leg.from.cancelled },
+            ...(leg.stops || []).map(st => ({ name: st.name, time: st.planned, delay: st.delay, cancelled: st.cancelled })),
+            { name: leg.to.name, time: leg.to.planned, delay: leg.to.delay, platform: leg.to.rtPlatform || leg.to.platform, cancelled: leg.to.cancelled },
+        ].filter(p => p.time);
+        const nowMs = Date.now();
+        const stops = pts.map(p => {
+            if (prev && p.time < prev) dayOffset += 1;
+            prev = p.time;
+            const [h, m] = p.time.split(':').map(Number);
+            const d = new Date(today); d.setDate(d.getDate() + dayOffset); d.setHours(h, m, 0, 0);
+            const at = d.getTime() + (p.delay || 0) * 60000;
+            return {
+                name: p.name, time: p.time, delay: p.delay == null ? null : p.delay,
+                depDelay: p.delay == null ? null : p.delay, arrDelay: null,
+                passed: at < nowMs, platform: p.platform || '', cancelled: !!p.cancelled,
+                day_offset: dayOffset, isVehicleHere: false,
+            };
+        });
+        return { line: leg.line, lineColor: leg.color, type: leg.type, operator: leg.operator, stops, messages: [] };
+    }
+
+    function tripTransitionEl(item, fromColor, toColor) {
+        const el = document.createElement('div');
+        let cls = 'trip-transition';
+        let text;
+        if (item.kind === 'walk') {
+            cls += ' walk';
+            text = `<strong>Fußweg ${escapeHtml(fmtTripDur(item.durationMin))}</strong>${item.distance ? ` · ${escapeHtml(item.distance)} m` : ''}<span>${escapeHtml(item.from.name)} → ${escapeHtml(item.to.name)}</span>`;
+        } else {
+            if (item.broken) cls += ' bad'; else if (item.risky) cls += ' warn';
+            const how = item.inStation
+                ? (item.walkMin ? `Umsteigen · ${escapeHtml(fmtTripDur(item.walkMin))} Fußweg im Bahnhof` : 'Umsteigen am selben Halt')
+                : `Umsteigen · ${escapeHtml(fmtTripDur(item.walkMin))} Fußweg${item.distance ? ` (${escapeHtml(item.distance)} m)` : ''}`;
+            let buf = '';
+            if (item.bufferMin != null) {
+                buf = item.broken ? 'Anschluss wahrscheinlich weg' : (item.risky ? `nur ${item.bufferMin} Min Puffer – knapp!` : `${item.bufferMin} Min Puffer`);
+            }
+            const where = (!item.inStation && item.at) ? `<span>zu ${escapeHtml(item.at)}</span>` : '';
+            text = `<strong>${how}</strong>${buf ? `<span class="trip-buffer">${escapeHtml(buf)}</span>` : ''}${where}`;
+        }
+        el.className = cls;
+        el.style.setProperty('--from', fromColor || 'var(--text-muted)');
+        el.style.setProperty('--to', toColor || 'var(--text-muted)');
+        el.innerHTML = `<span class="trip-transition-line" aria-hidden="true"></span>
+            <span class="trip-transition-icon" aria-hidden="true"><svg class="ico"><use href="#${cls.includes('warn') || cls.includes('bad') ? 'i-alert' : 'i-walk'}"/></svg></span>
+            <span class="trip-transition-text">${text}</span>`;
+        return el;
+    }
+
+    function renderTripTimeline(c, ctx, routeEl, msgEl, animate) {
+        routeEl.innerHTML = '';
+        msgEl.innerHTML = '';
+        const warn = c.cancelled ? 'Ein Teil dieser Fahrt fällt aus – such am besten eine Alternative.'
+            : c.broken ? 'Ein Anschluss ist wegen Verspätung wahrscheinlich nicht mehr erreichbar.'
+            : c.risky ? 'Achtung: ein Umstieg ist wegen Verspätung knapp.' : '';
+        if (warn) {
+            const a = document.createElement('div');
+            a.className = 'alert-card glass-card critical';
+            a.style.cssText = 'border-left-width:3px;padding:8px 12px;margin-bottom:12px;';
+            a.innerHTML = `<div style="font-size:var(--font-size-sm);display:flex;gap:6px;align-items:center;font-weight:600;"><span>⚠️</span><span>${escapeHtml(warn)}</span></div>`;
+            msgEl.appendChild(a);
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'trip-view';
+        routeEl.appendChild(wrap);
+        const legs = c.legs || [];
+        const colorAt = (idx, dir) => {
+            for (let k = idx; k >= 0 && k < legs.length; k += dir) if (legs[k].kind === 'transit') return legs[k].color;
+            return null;
+        };
+        const nowMs = Date.now();
+        let activeFound = false;
+        legs.forEach((leg, i) => {
+            if (leg.kind !== 'transit') {
+                wrap.appendChild(tripTransitionEl(leg, colorAt(i - 1, -1), colorAt(i + 1, 1)));
+                return;
+            }
+            const dep = (ctx.legDeps || []).find(d => d._legIndex === i);
+            const head = document.createElement('div');
+            head.className = 'trip-leg-head';
+            head.style.setProperty('--leg', leg.color);
+            const dark = getLuminance(leg.color) > 180;
+            const notes = (leg.notes || []).slice(0, 2).map(n => `<li>${escapeHtml(n)}</li>`).join('');
+            head.innerHTML = `
+                <span class="trip-leg-badge${dark ? ' dark-text' : ''}" style="background:${escapeHtml(leg.color)}">${escapeHtml(leg.label || leg.line)}</span>
+                <span class="trip-leg-title"><strong>Richtung ${escapeHtml(leg.direction || '')}</strong><span>${escapeHtml([leg.operator, fmtTripDur(leg.durationMin)].filter(Boolean).join(' · '))}</span></span>
+                ${dep ? '<button type="button" class="trip-line-btn">Linienverlauf</button>' : ''}
+                ${notes ? `<ul class="trip-leg-notes">${notes}</ul>` : ''}`;
+            const btn = head.querySelector('.trip-line-btn');
+            if (btn && dep) btn.addEventListener('click', () => handleItemSelection(dep));
+            wrap.appendChild(head);
+
+            const host = document.createElement('div');
+            host.className = 'trip-leg-track';
+            wrap.appendChild(host);
+            const scratch = document.createElement('div');
+            const data = tripLegData(leg);
+            renderStopsTimelineHTML(data, host, scratch, animate);
+            const rows = host.querySelectorAll('.journey-stop');
+            const tag = (row, text, cls) => {
+                const info = row && row.querySelector('.stop-info');
+                if (!info) return;
+                const t = document.createElement('span');
+                t.className = 'trip-stop-tag ' + cls;
+                t.textContent = text;
+                info.appendChild(t);
+                row.classList.add(cls === 'board' ? 'trip-board' : 'trip-alight');
+            };
+            tag(rows[0], 'Einsteigen', 'board');
+            tag(rows[rows.length - 1], i === legs.map(l => l.kind).lastIndexOf('transit') ? 'Ziel' : 'Aussteigen', 'alight');
+            const start = isoMs(leg.from.iso), end = isoMs(leg.to.iso);
+            const active = start != null && end != null && nowMs >= start - 2 * 60000 && nowMs <= end + 60000;
+            host.classList.toggle('trip-idle', !active);
+            if (active) activeFound = true;
+        });
+        if (animate) {
+            setTimeout(() => {
+                const cur = wrap.querySelector('.trip-leg-track:not(.trip-idle) .stop-dot.current');
+                if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 200);
+        }
+        return activeFound;
+    }
+
+    function openTripView(conn, ctx) {
+        if (journeyDetailInterval) clearInterval(journeyDetailInterval);
+        ctx = ctx || {};
+        activeJourneyData = { tripView: true, conn, ctx, journey_id: 'trip-' + (ctx.key || '') };
+        const desktop = isDesktopLayout() && appContainer.getAttribute('data-view') !== 'map';
+        const els = desktop
+            ? { route: detailsRoute, msgs: detailsMessages, title: detailsTitle, sub: detailsSubtitle, badge: detailsLineBadge, op: detailsOperator, remind: document.getElementById('detailsRemind') }
+            : { route: journeyRoute, msgs: journeyMessages, title: journeyModalTitle, sub: modalDirection, badge: modalLineBadge, op: modalOperator, remind: document.getElementById('modalRemind') };
+        if (desktop) {
+            detailsPlaceholder.style.display = 'none';
+            detailsContent.style.display = 'flex';
+        } else {
+            journeyModal.hidden = false;
+            journeyLoading.hidden = true;
+        }
+        const c = conn;
+        els.title.textContent = `${ctx.from || ''} → ${ctx.to || ''}`;
+        const transfers = c.transfers ? `${c.transfers} Umstieg${c.transfers > 1 ? 'e' : ''}` : 'Direkt';
+        els.sub.textContent = `${c.dep.rt || c.dep.planned} – ${c.arr.rt || c.arr.planned} · ${fmtTripDur(c.durationMin)} · ${transfers}`;
+        els.badge.textContent = 'Fahrt';
+        els.badge.style.backgroundColor = 'var(--primary)';
+        els.badge.classList.remove('dark-text');
+        if (els.op) els.op.innerHTML = '';
+        const first = (ctx.legDeps || [])[0];
+        if (window.MVBPush && els.remind) {
+            if (first) window.MVBPush.renderReminder(els.remind, first, first.station_name);
+            else els.remind.innerHTML = '';
+        }
+        renderLegSwitch(els.route, {});
+        const draw = (animate) => {
+            const fresh = ctx.getFresh ? ctx.getFresh() : conn;
+            renderTripTimeline(fresh, ctx, els.route, els.msgs, animate);
+        };
+        draw(true);
+        if (!desktop) journeyModal.focus();
+        journeyDetailInterval = setInterval(() => {
+            if (activeJourneyData && activeJourneyData.tripView) draw(false);
+        }, 30000);
     }
 
     function handleItemSelection(dep) {
@@ -2713,10 +2920,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isDesktopLayout() && detailsContent.style.display === 'flex' && activeJourneyData) {
             detailsContent.style.display = 'none';
             detailsPlaceholder.style.display = 'flex';
-            openJourneyMobileModal(activeJourneyData);
+            if (activeJourneyData.tripView) openTripView(activeJourneyData.conn, activeJourneyData.ctx);
+            else openJourneyMobileModal(activeJourneyData);
         } else if (isDesktopLayout() && !journeyModal.hidden && activeJourneyData && appContainer.getAttribute('data-view') !== 'map') {
             closeJourneyModal();
-            openJourneyDesktopPanel(activeJourneyData);
+            if (activeJourneyData.tripView) openTripView(activeJourneyData.conn, activeJourneyData.ctx);
+            else openJourneyDesktopPanel(activeJourneyData);
         }
     });
 
@@ -2732,6 +2941,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (action === 'live-departures') {
                 switchTab('departures');
+                setPlanView('board');
                 fetchDepartures();
                 scrollToResults();
             } else if (action === 'alerts') {
@@ -3416,7 +3626,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.MVBApp = {
         apiBase: API_BASE,
         escapeHtml, getLuminance, showToast, formatPlatform, announceToScreenReader,
-        handleItemSelection, switchTab, setPlanView, scrollToResults, setupAutocomplete,
+        handleItemSelection, openTripView, switchTab, setPlanView, scrollToResults, setupAutocomplete,
         resolveStationFromText, fetchDepartures, applyTheme: (t) => applyTheme(t),
         getCurrentStation: () => currentStation,
         getTheme: () => currentTheme,
@@ -3426,6 +3636,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (clearStationBtn) clearStationBtn.hidden = !stationInput.value;
         },
         isNowMode: () => isNowModeActive,
+        getPlanView: () => currentPlanView,
         getDateTime: () => ({ date: depDate.value, time: depTime.value }),
         setDuration: (v) => { if (depDuration) depDuration.value = String(v); },
         submit: () => submitDepBtn.click(),
@@ -3446,6 +3657,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial view: Home, or the tab requested via ?tab= (push notifications, app shortcuts)
     const VALID_TABS = ['home', 'departures', 'connections', 'map', 'alerts', 'tickets', 'news'];
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    setPlanView(requestedTab === 'connections' ? 'routes' : (requestedTab === 'departures' ? 'board' : currentPlanView));
     switchTab(VALID_TABS.includes(requestedTab) ? requestedTab : 'home');
     if (requestedTab && window.history.replaceState) {
         window.history.replaceState(null, '', window.location.pathname);

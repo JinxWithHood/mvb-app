@@ -100,17 +100,13 @@
 
     function render() {
         const s = settings;
-        const app = window.MVBApp;
-        const cur = app && app.getCurrentStation ? app.getCurrentStation() : null;
-        const home = s.homeStation;
-        const theme = currentTheme();
         overlay.querySelector('.settings-body').innerHTML = `
             <section class="set-section">
                 <h3 class="set-heading">Verkehrsmittel</h3>
                 <div class="set-chips">
                     ${MODES.map(([k, label]) => `<button type="button" class="set-chip${s.modes[k] ? ' on' : ''}" data-mode="${k}" aria-pressed="${!!s.modes[k]}">${label}</button>`).join('')}
                 </div>
-                <p class="set-note">Gilt für die Verbindungssuche. Die Abfahrtstafel filterst du direkt über ihre Knöpfe.</p>
+                <p class="set-note">Welche Verkehrsmittel die Verbindungssuche nutzen darf.</p>
             </section>
 
             <section class="set-section">
@@ -126,29 +122,6 @@
                     </div>
                     ${toggle('dticket', 'Nur Deutschlandticket', 'Ohne ICE, IC und EC', s.dticket)}
                     ${toggle('bike', 'Fahrrad dabei', 'Nur Fahrten mit Fahrradmitnahme', s.bike)}
-                </div>
-            </section>
-
-            <section class="set-section">
-                <h3 class="set-heading">Abfahrten &amp; App</h3>
-                <div class="set-card">
-                    <div class="set-row set-stack">
-                        <span class="set-row-title">Zeitraum der Abfahrtstafel</span>
-                        ${seg('boardDuration', [[30, '30 Min'], [60, '1 Std'], [120, '2 Std'], [240, '4 Std']], s.boardDuration)}
-                    </div>
-                    <div class="set-row set-stack">
-                        <span class="set-row-title">Start-Haltestelle beim Öffnen</span>
-                        <span class="set-row-sub">${home ? esc(home.name) : 'Magdeburg Hauptbahnhof (Standard)'}</span>
-                        <div class="set-actions">
-                            ${cur && (!home || String(home.id) !== String(cur.id)) && cur.kind !== 'address' ? `<button type="button" class="set-btn" data-action="home-set">„${esc(cur.name.replace(/^Magdeburg,\s*/, ''))}“ übernehmen</button>` : ''}
-                            ${home ? '<button type="button" class="set-btn ghost" data-action="home-clear">Zurück auf Standard</button>' : ''}
-                        </div>
-                    </div>
-                    ${theme === 'jinx' ? '' : `<div class="set-row set-stack">
-                        <span class="set-row-title">Design</span>
-                        ${seg('theme', [['light', 'Hell'], ['dark', 'Dunkel']], theme)}
-                    </div>`}
-                    ${toggle('season', 'Saison-Deko auf der Karte', 'Ostern, Halloween, Weihnachten …', seasonOn())}
                 </div>
             </section>
 
@@ -201,7 +174,6 @@
             settings = clone(DEFAULTS);
             settings.homeStation = home;
             save();
-            if (window.MVBApp) { window.MVBApp.setDuration(60); }
             render();
             if (window.MVBApp) window.MVBApp.showToast('Einstellungen zurückgesetzt', 'info');
         } else if (act === 'close') {
@@ -228,7 +200,7 @@
             <div class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
                 <div class="settings-handle" aria-hidden="true"></div>
                 <div class="settings-head">
-                    <h2 id="settingsTitle">Einstellungen</h2>
+                    <h2 id="settingsTitle">Optionen für Verbindungen</h2>
                     <button type="button" class="settings-done" data-action="close">Fertig</button>
                 </div>
                 <div class="settings-body"></div>

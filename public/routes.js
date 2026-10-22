@@ -119,7 +119,7 @@
         if (!wrap && anchor) {
             wrap = document.createElement('div');
             wrap.id = 'quickRoutes';
-            wrap.className = 'quick-stations quick-routes';
+            wrap.className = 'quick-stations quick-routes only-routes';
             wrap.setAttribute('aria-label', 'Letzte Strecken');
             anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
         }
@@ -160,16 +160,8 @@
     }
 
     function updateMode() {
-        const has = hasDestination();
-        const label = $('submitLabel');
-        if (label) label.textContent = has ? 'Verbindungen suchen' : 'Abfahrten zeigen';
-        const tm = $('timeModeGroup');
-        if (tm) tm.hidden = !has;
         const form = $('form-departures');
-        if (form) form.classList.toggle('has-dest', has);
-        const tab = $('planTabBoard');
-        const st = A && A.getCurrentStation();
-        if (tab) tab.textContent = st && st.name ? `Abfahrten ${shortName(st.name)}` : 'Abfahrten';
+        if (form) form.classList.toggle('has-dest', hasDestination());
     }
 
     function setTimeMode(mode) {
@@ -462,7 +454,7 @@
                 <ol class="rl-stops" hidden>${stops.map(s => `<li${s.cancelled ? ' class="cancelled"' : ''}><span class="ls-time">${esc(s.rt || s.planned || '')}</span><span class="ls-name">${esc(s.name)}</span>${s.delay > 0 ? `<span class="ls-delay">+${s.delay}</span>` : ''}</li>`).join('')}</ol>` : ''}
                 ${notes ? `<ul class="rl-notes">${notes}</ul>` : ''}
                 ${attrs}
-                ${l.journeyId ? `<button type="button" class="rl-live-btn" data-leg="${i}"><span class="live-dot" aria-hidden="true"></span>Linienverlauf &amp; Live-Position</button>` : ''}
+                ${l.journeyId ? `<button type="button" class="rl-live-btn" data-leg="${i}"><span class="live-dot" aria-hidden="true"></span>Ganzer Linienverlauf</button>` : ''}
             </div>
             <div class="rl-row">
                 <div class="rl-time">${timeHtml(l.to)}</div>
@@ -528,29 +520,33 @@
             date: (l.from.plannedIso || '').slice(0, 10), matchMvb: l.src === 'db' && !!l.mvb,
             _legIndex: i,
         }));
-        deps.forEach((d, k) => { d.tripLegs = deps; d.tripLegIndex = k; });
+        deps.forEach((d, k) => { d.tripLegs = deps; d.tripLegIndex = k; d.tripConn = c; });
         return deps;
     }
 
     function follow(c, legIdx) {
-        const deps = legDeps(c);
-        if (!deps.length) {
-            A.showToast('Für diese Fahrt gibt es keinen Linienverlauf', 'info');
+        if (legIdx == null) {
+            // whole journey: boarding → stops → walk → next vehicle …
+            A.openTripView(c, tripContext(c));
             return;
         }
-        let pick = deps[0];
-        if (legIdx != null) pick = deps.find(d => d._legIndex === legIdx) || pick;
-        else {
-            // the leg that is running now (or the next one)
-            const now = Date.now();
-            const running = deps.find((d, k) => {
-                const leg = c.legs[d._legIndex];
-                const end = new Date(leg.to.iso).getTime();
-                return end > now;
-            });
-            if (running) pick = running;
+        const deps = legDeps(c);
+        const pick = deps.find(d => d._legIndex === legIdx);
+        if (!pick) {
+            A.showToast('Für diese Linie gibt es keinen Linienverlauf', 'info');
+            return;
         }
         A.handleItemSelection(pick);
+    }
+
+    function tripContext(c) {
+        const from = (state.from && state.from.name) || A.getCurrentStation().name;
+        const to = (state.to && state.to.name) || (destStation && destStation.name);
+        return {
+            key: c.key, from: shortName(from), to: shortName(to),
+            legDeps: legDeps(c),
+            getFresh: () => state.conns.find(x => x.key === c.key) || c,
+        };
     }
 
     function share(c) {
@@ -622,7 +618,6 @@
         if (dc) dc.addEventListener('click', () => {
             destStation = null;
             updateMode();
-            A.setPlanView('board');
         });
         const sw = $('swapBtn');
         if (sw) sw.addEventListener('click', swap);
@@ -664,11 +659,14 @@
     }
 
     function onViewChange(view) {
-        if (view === 'routes' && A && hasDestination() && !state.params) search();
+        if (view === 'routes' && A && hasDestination() && !state.params && destStation) search();
         updateMode();
     }
 
-    window.MVBRoutes = { search, hasDestination, setDest, onViewChange, getDest: () => destStation };
+    window.MVBRoutes = {
+        search, hasDestination, setDest, onViewChange, getDest: () => destStation,
+        followTrip: (c) => A.openTripView(c, tripContext(c)),
+    };
 
     if (window.MVBApp) init();
     else document.addEventListener('mvb:app-ready', init, { once: true });

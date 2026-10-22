@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10.0">
+  <link rel="stylesheet" href="styles.css?v=10.1">
 </head>
 <body>
   <!-- SVG Icon Sprite -->
@@ -142,7 +142,6 @@
         <div class="header-actions">
           <div class="header-time" id="headerTime" aria-label="Aktuelle Uhrzeit">--:--</div>
           <button type="button" class="header-install-btn" data-install-app hidden title="Als App installieren" aria-label="Als App installieren"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span>App</span></button>
-          <button type="button" id="settingsBtn" class="header-theme-btn" aria-label="Einstellungen" title="Einstellungen"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg></button>
           <button id="themeToggleBtn" class="header-theme-btn" aria-label="Farbschema wechseln" title="Farbschema wechseln"><svg class="ico" aria-hidden="true"><use href="#i-moon"/></svg></button>
         </div>
       </div>
@@ -175,10 +174,14 @@
           <div class="search-widget-card glass-card" id="unifiedSearchWidget">
 
             <!-- FAHRPLAN: one form for departures (only "Von") and connections ("Von" + "Nach") -->
-            <div class="widget-form-panel plan-form" id="form-departures" role="search" aria-label="Fahrplan-Suche">
+            <div class="widget-form-panel plan-form" id="form-departures" role="search" aria-label="Fahrplan-Suche" data-mode="board">
+              <div class="plan-mode" role="tablist" aria-label="Was suchst du?">
+                <button type="button" class="plan-mode-btn active" role="tab" aria-selected="true" data-planmode="board"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg>Abfahrten</button>
+                <button type="button" class="plan-mode-btn" role="tab" aria-selected="false" data-planmode="routes"><svg class="ico" aria-hidden="true"><use href="#i-route"/></svg>Verbindung</button>
+              </div>
               <div class="plan-fields">
                 <div class="search-field plan-field">
-                  <label for="stationInput" class="field-label">Von</label>
+                  <label for="stationInput" class="field-label"><span class="only-board">Haltestelle</span><span class="only-routes">Von</span></label>
                   <div class="input-wrapper">
                     <svg class="input-icon ico" aria-hidden="true"><use href="#i-pin"/></svg>
                     <input type="text" id="stationInput" class="widget-input"
@@ -195,10 +198,10 @@
                   <ul id="stationSuggestions" class="suggestions-list" role="listbox" aria-label="Start-Vorschläge" hidden></ul>
                 </div>
 
-                <button type="button" class="swap-btn plan-swap" id="swapBtn" aria-label="Start und Ziel tauschen" title="Start und Ziel tauschen"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg></button>
+                <button type="button" class="swap-btn plan-swap only-routes" id="swapBtn" aria-label="Start und Ziel tauschen" title="Start und Ziel tauschen"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg></button>
 
-                <div class="search-field plan-field">
-                  <label for="destInput" class="field-label">Nach <span class="field-hint">– optional, leer = Abfahrten</span></label>
+                <div class="search-field plan-field only-routes" id="destField">
+                  <label for="destInput" class="field-label">Nach</label>
                   <div class="input-wrapper plan-dest-wrap" id="destWrap">
                     <svg class="input-icon ico" aria-hidden="true"><use href="#i-target"/></svg>
                     <input type="text" id="destInput" class="widget-input" placeholder="Ziel hinzufügen…" autocomplete="off" enterkeyhint="search" aria-label="Ziel-Haltestelle" aria-autocomplete="list" aria-controls="destSuggestions" aria-expanded="false">
@@ -211,7 +214,7 @@
               <div class="quick-stations" id="quickStations" aria-label="Schnellwahl"></div>
 
               <div class="plan-when">
-                <div class="plan-seg" id="timeModeGroup" role="group" aria-label="Zeitbezug" hidden>
+                <div class="plan-seg only-routes" id="timeModeGroup" role="group" aria-label="Zeitbezug">
                   <button type="button" class="plan-seg-btn active" data-timemode="dep" aria-pressed="true">Abfahrt</button>
                   <button type="button" class="plan-seg-btn" data-timemode="arr" aria-pressed="false">Ankunft</button>
                 </div>
@@ -226,13 +229,18 @@
                   <label for="depTime" class="sr-only">Uhrzeit</label>
                   <div class="input-wrapper"><input type="time" id="depTime" aria-label="Uhrzeit"></div>
                 </div>
-                <select id="depDuration" aria-label="Zeitraum" hidden>
-                  <option value="30">30 min</option>
-                  <option value="60" selected>60 min</option>
-                  <option value="120">2 Std</option>
-                  <option value="240">4 Std</option>
-                </select>
-                <button type="button" class="plan-options-btn" id="planOptionsBtn" aria-label="Optionen und Einstellungen">
+                <div class="datetime-field compact only-board">
+                  <label for="depDuration" class="sr-only">Zeitraum</label>
+                  <div class="input-wrapper">
+                    <select id="depDuration" aria-label="Zeitraum">
+                      <option value="30">30 min</option>
+                      <option value="60" selected>60 min</option>
+                      <option value="120">2 Std</option>
+                      <option value="240">4 Std</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="button" class="plan-options-btn only-routes" id="planOptionsBtn" aria-label="Optionen für die Verbindungssuche">
                   <svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg><span>Optionen</span><span class="plan-options-count" id="planOptionsCount" hidden>0</span>
                 </button>
               </div>
@@ -318,10 +326,6 @@
 
               <!-- === DEPARTURES === -->
               <div class="result-tab-content" id="panel-departures" hidden>
-                <div class="plan-switch" id="planSwitch" role="tablist" aria-label="Ansicht">
-                  <button type="button" class="plan-switch-btn active" role="tab" aria-selected="true" data-planview="board" id="planTabBoard">Abfahrten</button>
-                  <button type="button" class="plan-switch-btn" role="tab" aria-selected="false" data-planview="routes" id="planTabRoutes">Verbindungen</button>
-                </div>
                 <div id="planBoard">
                 <div class="board-header">
                   <div class="board-title-wrap">
@@ -1027,9 +1031,9 @@
   <script src="live-map.js?v=9.3"></script>
   <script src="season.js?v=1.0"></script>
   <script src="push.js?v=8.0"></script>
-  <script src="settings.js?v=1.0"></script>
-  <script src="app.js?v=9.0"></script>
-  <script src="routes.js?v=1.0"></script>
+  <script src="settings.js?v=1.1"></script>
+  <script src="app.js?v=9.1"></script>
+  <script src="routes.js?v=1.1"></script>
   <script>
     // Failsafe: Ladebildschirm spätestens nach 4 Sekunden entfernen
     setTimeout(function () {
