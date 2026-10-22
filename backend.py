@@ -1067,15 +1067,33 @@ def search_station():
     has_tr = any(r.get('src') == 'tr' for r in results)
     if has_tr:
         results = [r for r in results if not (r.get('_pt') and not _in_nasa_area(r['_pt']))]
+    # Transitous also knows Switzerland & co. – this is a German app
+    results = [r for r in results if not (r.get('src') == 'tr' and not str(r.get('id', '')).startswith('tr:de-'))]
     for r in results:
         r.pop('_pt', None)
 
-    # Prioritize Magdeburg stations at the top
-    results_magdeburg = [r for r in results if "magdeburg" in r["name"].lower()]
-    results_other = [r for r in results if "magdeburg" not in r["name"].lower()]
-    results = results_magdeburg + results_other
+    # Relevance: real matches first (all query words in the name), fuzzy HAFAS guesses last,
+    # Magdeburg stations first within each tier
+    def _fold(s):
+        s = (s or '').lower()
+        for a, b in (('ä', 'ae'), ('ö', 'oe'), ('ü', 'ue'), ('ß', 'ss'), ('straße', 'str'), ('strasse', 'str')):
+            s = s.replace(a, b)
+        return re.sub(r'[^a-z0-9]+', ' ', s).strip()
+    q_tokens = [t for t in _fold(query).replace('strasse', 'str').split() if t]
 
-    return jsonify(results)
+    def _tier(name):
+        n = _fold(name)
+        if not q_tokens:
+            return 0
+        hits = sum(1 for t in q_tokens if t in n)
+        return 2 if hits == len(q_tokens) else (1 if hits else 0)
+
+    ranked = sorted(enumerate(results), key=lambda p: (
+        -_tier(p[1]["name"]), 0 if "magdeburg" in p[1]["name"].lower() else 1, p[0]))
+    results = [r for _, r in ranked]
+    if sum(1 for r in results if _tier(r["name"]) == 2) >= 3:
+        results = [r for r in results if _tier(r["name"]) > 0]
+    return jsonify(results[:20])
 
 
 # -------------------------------------------------------------------
