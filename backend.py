@@ -870,7 +870,7 @@ def generate_fallback_journey(line: str, direction: str, start_time_str: str,
         actual_dt = stop_dt + datetime.timedelta(minutes=stop_delay)
         passed = actual_dt.timestamp() < now_ts
         time_str = stop_dt.strftime('%H:%M')
-        day_offset = max(0, (stop_dt.date() - datetime.datetime.now(local_tz).date()).days)
+        day_offset = (stop_dt.date() - datetime.datetime.now(local_tz).date()).days
 
         estimated = _compute_estimated_time(time_str, stop_delay) if stop_delay >= 5 else None
         if passed:
@@ -1324,8 +1324,7 @@ def get_departures():
                 if dep.dateTime:
                     dep_date = dep.dateTime.astimezone(local_tz).date()
                     today_date = datetime.datetime.now(local_tz).date()
-                    if dep_date > today_date:
-                        day_offset = (dep_date - today_date).days
+                    day_offset = (dep_date - today_date).days
 
                 # Time string
                 time_str = dep.dateTime.strftime('%H:%M') if dep.dateTime else ""
@@ -1468,8 +1467,8 @@ def get_journey():
             journey_date_str = datetime.datetime.now(local_tz).strftime('%Y%m%d')
         # HAFAS counts days from the service day; the app counts from today (trip tomorrow -> +1)
         try:
-            journey_day_shift = max(0, (datetime.datetime.strptime(journey_date_str, '%Y%m%d').date()
-                                        - datetime.datetime.now(local_tz).date()).days)
+            journey_day_shift = (datetime.datetime.strptime(journey_date_str, '%Y%m%d').date()
+                                 - datetime.datetime.now(local_tz).date()).days   # -1 = started yesterday
         except ValueError:
             journey_day_shift = 0
         locL = common.get('locL', [])
@@ -4537,7 +4536,7 @@ def _db_departure_item(e, station_name, idx):
         'originalDirection': None, 'isDiverted': False, 'diversion': None, 'diversionInfo': None,
         'time': time_str, 'delay': delay, 'type': st['type'], 'isSEV': st['type'] == 'sev',
         'sevInfo': 'Schienenersatzverkehr' if st['type'] == 'sev' else None,
-        'day_offset': max(0, (planned.date() - today).days) if planned else 0,
+        'day_offset': (planned.date() - today).days if planned else 0,
         'cancelled': cancelled, 'lineColor': st['color'],
         'realtimeStatus': _realtime_status(delay, cancelled),
         'estimatedTime': _hm(realtime) if (delay not in (None, 0)) else None,
@@ -4565,7 +4564,7 @@ def _db_trip(jid, line_hint=None):
                       'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
                       'platform': h.get('ezGleis') or h.get('gleis') or '',
                       'cancelled': bool(h.get('cancelled')), 'lat': None, 'lon': None,
-                      'day_offset': max(0, (p.date() - now.date()).days) if p else 0})
+                      'day_offset': (p.date() - now.date()).days if p else 0})
     zug = (raw.get('zugName') or '').strip()
     kat = ((halte[0].get('kategorie') if halte else '') or zug.split(' ')[0]).upper()
     gattung = {'STR': 'TRAM', 'BUS': 'BUS', 'U': 'UBAHN', 'S': 'SBAHN', 'ICE': 'ICE', 'IC': 'EC_IC',
@@ -5103,7 +5102,7 @@ def _tr_departure_item(s, station_name, idx):
         'originalDirection': None, 'isDiverted': False, 'diversion': None, 'diversionInfo': None,
         'time': time_str, 'delay': delay, 'type': st['type'], 'isSEV': st['type'] == 'sev',
         'sevInfo': 'Schienenersatzverkehr' if st['type'] == 'sev' else None,
-        'day_offset': max(0, (planned.date() - today).days) if planned else 0,
+        'day_offset': (planned.date() - today).days if planned else 0,
         'cancelled': cancelled, 'lineColor': st['color'],
         'realtimeStatus': _realtime_status(delay, cancelled),
         'estimatedTime': _hm(real) if (delay not in (None, 0)) else None,
@@ -5153,7 +5152,7 @@ def _tr_trip(jid, line_hint=None):
                       'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
                       'platform': pl.get('track') or pl.get('scheduledTrack') or '',
                       'cancelled': bool(pl.get('cancelled')), 'lat': pl.get('lat'), 'lon': pl.get('lon'),
-                      'day_offset': max(0, (p.date() - now.date()).days) if p else 0})
+                      'day_offset': (p.date() - now.date()).days if p else 0})
     st = _tr_style(leg, *(x.get('name') for x in places[:2]))
     return {'id': jid, 'line': line_hint or st['line'], 'short': st['label'], 'type': st['type'], 'color': st['color'],
             'direction': _short_stop(leg.get('headsign') or (places[-1].get('name') if places else '')),

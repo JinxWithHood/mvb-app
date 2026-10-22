@@ -1895,7 +1895,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function tripLegData(leg) {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const startDay = leg.from.plannedIso ? new Date(leg.from.plannedIso.slice(0, 10) + 'T00:00:00') : today;
-        let dayOffset = Math.max(0, Math.round((startDay - today) / 86400000));
+        let dayOffset = Math.round((startDay - today) / 86400000);   // -1 = started yesterday
         let prev = null;
         const pts = [
             { name: leg.from.name, time: leg.from.planned, delay: leg.from.delay, platform: leg.from.rtPlatform || leg.from.platform, cancelled: leg.from.cancelled },
