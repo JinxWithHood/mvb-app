@@ -4799,6 +4799,13 @@ def api_routes():
                     'details': errors[:3]}), 502
 
 
+# ---------------------------------------------------------------------------
+# Admin area (login, push broadcast, maintenance mode) – see admin.py
+# ---------------------------------------------------------------------------
+import sys as _sys
+import admin as _admin
+_admin.init(app, _sys.modules[__name__])
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print("=" * 60)
