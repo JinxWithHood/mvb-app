@@ -1803,6 +1803,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const st = dep.station_name || (currentStation && currentStation.name) || '';
         let q = `journey_id=${encodeURIComponent(dep.journey_id)}&line=${encodeURIComponent(dep.line)}&direction=${encodeURIComponent(dep.direction)}&time=${encodeURIComponent(dep.time)}&delay=${encodeURIComponent(dep.delay || 0)}&station_name=${encodeURIComponent(st)}`;
         if (String(dep.journey_id || '').startsWith('db|') && dep.lineColor) q += `&color=${encodeURIComponent(dep.lineColor)}`;
+        // service day of this departure (day_offset counts from today)
+        const day = new Date(); day.setDate(day.getDate() + (dep.day_offset || 0));
+        q += `&date=${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
         return q + `&_=${Date.now()}`;
     }
 

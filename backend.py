@@ -795,7 +795,7 @@ def _realtime_status(delay, cancelled: bool = False) -> str:
 
 
 def generate_fallback_journey(line: str, direction: str, start_time_str: str,
-                              delay: int, station_name: str = None):
+                              delay: int, station_name: str = None, date_str: str = None):
     """
     Build a synthetic journey response from FALLBACK_ROUTES when HAFAS
     journey-detail calls fail.  Returns a Flask JSON response.
@@ -842,6 +842,12 @@ def generate_fallback_journey(line: str, direction: str, start_time_str: str,
         h, m = int(parts[0]), int(parts[1])
         now = datetime.datetime.now(local_tz)
         anchor_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if date_str:
+            try:
+                d = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+                anchor_dt = anchor_dt.replace(year=d.year, month=d.month, day=d.day)
+            except ValueError:
+                pass
     except Exception:
         anchor_dt = datetime.datetime.now(local_tz)
 
@@ -864,7 +870,7 @@ def generate_fallback_journey(line: str, direction: str, start_time_str: str,
         actual_dt = stop_dt + datetime.timedelta(minutes=stop_delay)
         passed = actual_dt.timestamp() < now_ts
         time_str = stop_dt.strftime('%H:%M')
-        day_offset = max(0, (stop_dt.date() - anchor_dt.date()).days)
+        day_offset = max(0, (stop_dt.date() - datetime.datetime.now(local_tz).date()).days)
 
         estimated = _compute_estimated_time(time_str, stop_delay) if stop_delay >= 5 else None
         if passed:
@@ -1313,12 +1319,13 @@ def get_departures():
                     rt_status = _realtime_status(delay, cancelled)
 
                 # Day offset
+                # Day offset – counted from TODAY (the app adds it to today's date)
                 day_offset = 0
                 if dep.dateTime:
                     dep_date = dep.dateTime.astimezone(local_tz).date()
-                    search_date = search_dt.astimezone(local_tz).date()
-                    if dep_date > search_date:
-                        day_offset = (dep_date - search_date).days
+                    today_date = datetime.datetime.now(local_tz).date()
+                    if dep_date > today_date:
+                        day_offset = (dep_date - today_date).days
 
                 # Time string
                 time_str = dep.dateTime.strftime('%H:%M') if dep.dateTime else ""
@@ -1403,7 +1410,7 @@ def get_journey():
         except Exception as ex:
             print(f"[WARN] transitous journey: {ex}")
             return generate_fallback_journey(fallback_line, fallback_direction, fallback_time,
-                                             fallback_delay, station_name)
+                                             fallback_delay, station_name, request.args.get('date'))
 
     if journey_id.startswith(DB_PREFIX):
         try:
@@ -1413,13 +1420,13 @@ def get_journey():
         except Exception as ex:
             print(f"[WARN] bahn.de journey: {ex}")
             return generate_fallback_journey(fallback_line, fallback_direction, fallback_time,
-                                             fallback_delay, station_name)
+                                             fallback_delay, station_name, request.args.get('date'))
 
     # Handle mock journeys immediately
     if journey_id.startswith("mock_j_"):
         return generate_fallback_journey(
             fallback_line, fallback_direction, fallback_time,
-            fallback_delay, station_name
+            fallback_delay, station_name, request.args.get('date')
         )
 
     # ---- Try HAFAS JourneyDetails ----
@@ -1449,7 +1456,7 @@ def get_journey():
         print(f"[INFO] All HAFAS clients failed for journey {journey_id}. Using fallback.")
         return generate_fallback_journey(
             fallback_line, fallback_direction, fallback_time,
-            fallback_delay, station_name
+            fallback_delay, station_name, request.args.get('date')
         )
 
     # ---- Parse raw HAFAS response ----
@@ -1459,6 +1466,12 @@ def get_journey():
         journey_date_str = journey.get('date')
         if not journey_date_str:
             journey_date_str = datetime.datetime.now(local_tz).strftime('%Y%m%d')
+        # HAFAS counts days from the service day; the app counts from today (trip tomorrow -> +1)
+        try:
+            journey_day_shift = max(0, (datetime.datetime.strptime(journey_date_str, '%Y%m%d').date()
+                                        - datetime.datetime.now(local_tz).date()).days)
+        except ValueError:
+            journey_day_shift = 0
         locL = common.get('locL', [])
 
         # Extract trip number from product context
@@ -1685,7 +1698,7 @@ def get_journey():
                 "passed": passed,
                 "platform": pltf,
                 "cancelled": cancelled,
-                "day_offset": day_offset,
+                "day_offset": (day_offset or 0) + journey_day_shift,
                 "estimatedTime": estimated,
                 "isVehicleHere": False,  # set below
                 "line": stop_line,
@@ -1946,7 +1959,7 @@ def get_journey():
         traceback.print_exc()
         return generate_fallback_journey(
             fallback_line, fallback_direction, fallback_time,
-            fallback_delay, station_name
+            fallback_delay, station_name, request.args.get('date')
         )
 
 
