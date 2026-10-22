@@ -53,7 +53,13 @@ def patched_parse_leg(self, journey, common, departure, arrival, date, jny_type=
             name=None,
             distance=gis.get('dist') if (gis and isinstance(gis, dict)) else None
         )
-    return original_parse_leg(self, journey, common, departure, arrival, date, jny_type, gis)
+    leg = original_parse_leg(self, journey, common, departure, arrival, date, jny_type, gis)
+    # pyhafas drops the terminus of the vehicle – keep it so the app shows the real direction
+    try:
+        leg.direction = (journey or {}).get('dirTxt') or None
+    except Exception:
+        pass
+    return leg
 
 BaseParseLegHelper.parse_leg = patched_parse_leg
 
@@ -982,7 +988,15 @@ def search_station():
             if not nasa_client:
                 return []
             try:
-                return [{"id": loc.id, "name": loc.name} for loc in nasa_client.locations(query) if loc.id]
+                out = []
+                for loc in nasa_client.locations(query):
+                    if not loc.id:
+                        continue
+                    item = {"id": loc.id, "name": loc.name}
+                    if getattr(loc, 'latitude', None) is not None:
+                        item["_pt"] = (float(loc.latitude), float(loc.longitude))
+                    out.append(item)
+                return out
             except Exception as ex:
                 print(f"[WARN] NASA location search failed: {ex}")
                 return []
@@ -1017,12 +1031,25 @@ def search_station():
             parts = [x.strip() for x in re.sub(r'\s+', ' ', (n or '').lower()).split(',') if x.strip()]
             return '|'.join(sorted(parts))
         seen_names = {_name_key(n) for n in seen_names}
-        tasks = [query_nasa, query_db]
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        def query_tr():
+            try:
+                return [{"id": loc['id'], "name": loc['name'], "kind": "stop", "src": "tr"}
+                        for loc in transitous.geocode(query, limit=10)]
+            except Exception as ex:
+                print(f"[WARN] Transitous search failed: {ex}")
+                return []
+
+        tasks = [query_nasa, query_db, query_tr]
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(task) for task in tasks]
-            for future in futures:
+            db_had_results = False
+            for ti, future in enumerate(futures):
                 try:
                     task_results = future.result(timeout=3)
+                    if ti == 1 and task_results:
+                        db_had_results = True
+                    if ti == 2 and db_had_results:
+                        continue   # bahn.de works: no need for the Transitous duplicates
                     for item in task_results:
                         iid = item.get("id")
                         norm_name = _name_key(item.get("name", ""))
@@ -1035,6 +1062,13 @@ def search_station():
 
     except Exception as e:
         print(f"[ERROR] Search API: {e}")
+
+    # Outside Mitteldeutschland NASA only knows the trains – prefer the full stops from Transitous there
+    has_tr = any(r.get('src') == 'tr' for r in results)
+    if has_tr:
+        results = [r for r in results if not (r.get('_pt') and not _in_nasa_area(r['_pt']))]
+    for r in results:
+        r.pop('_pt', None)
 
     # Prioritize Magdeburg stations at the top
     results_magdeburg = [r for r in results if "magdeburg" in r["name"].lower()]
@@ -1058,6 +1092,8 @@ def get_departures():
         return jsonify({"error": "station_id required"}), 400
     if station_id.startswith('db:'):
         return _db_departures_response(station_id)
+    if station_id.startswith('tr:'):
+        return _tr_departures_response(station_id)
 
     date_param = request.args.get('date')       # YYYY-MM-DD
     time_param = request.args.get('time')       # HH:MM
@@ -1340,6 +1376,16 @@ def get_journey():
 
     if not journey_id:
         return jsonify({"error": "journey_id required"}), 400
+
+    if journey_id.startswith('tr|'):
+        try:
+            return jsonify(_tr_journey_response(journey_id, station_name, request.args.get('line') or None,
+                                                request.args.get('direction') or None,
+                                                request.args.get('color') or None))
+        except Exception as ex:
+            print(f"[WARN] transitous journey: {ex}")
+            return generate_fallback_journey(fallback_line, fallback_direction, fallback_time,
+                                             fallback_delay, station_name)
 
     if journey_id.startswith(DB_PREFIX):
         try:
@@ -3375,6 +3421,8 @@ def _fit_stops_to_shape(shape, coords):
 def _fetch_trip(jid, want_raw=False):
     if jid and jid.startswith('db|'):
         return _db_trip(jid)
+    if jid and jid.startswith('tr|'):
+        return _tr_trip(jid)
     now_ts = time.time()
     hit = _trip_cache.get(jid)
     if hit and not want_raw and now_ts - hit[0] < _TRIP_CACHE_TTL:
@@ -4230,6 +4278,7 @@ def push_tick_route():
 #  FAHRPLAN v2 – bundesweite Daten (bahn.de) + neue Verbindungssuche
 # ===========================================================================
 import dbweb
+import transitous
 from concurrent.futures import ThreadPoolExecutor as _V2Pool, TimeoutError as _V2Timeout
 
 _v2_pool = _V2Pool(max_workers=6)
@@ -4504,6 +4553,10 @@ def _db_trip(jid, line_hint=None):
 def _db_journey_response(jid, station_name, line_hint=None, direction_hint=None, color_hint=None):
     """bahn.de trip -> /api/journey response (same keys as the NASA path)."""
     trip = _db_trip(jid, line_hint)
+    return _trip_to_journey_response(trip, station_name, line_hint, direction_hint, color_hint, 'db')
+
+
+def _trip_to_journey_response(trip, station_name, line_hint, direction_hint, color_hint, source):
     stops = []
     vehicle_pos = 0
     last = len(trip['stops']) - 1
@@ -4536,7 +4589,7 @@ def _db_journey_response(jid, station_name, line_hint=None, direction_hint=None,
         'totalStops': total, 'trip_num': None, 'messages': messages, 'stops': stops,
         'type': trip['type'], 'isSEV': trip['type'] == 'sev', 'sev_info': None,
         'operator': trip.get('operator') or ('MVB' if trip['type'] in ('tram', 'bus', 'sev') and _is_magdeburg(station_name) else 'DB'),
-        'source': 'db',
+        'source': source,
     }
 
 
@@ -4754,7 +4807,7 @@ def api_routes():
     db_blocked = False
 
     # ---- 1) bahn.de (bundesweit, Echtzeit, Preise) ----
-    if not page.startswith('nasa:'):
+    if not page.startswith(('nasa:', 'tr:')):
         try:
             fut_from = _v2_pool.submit(_db_lid_for, from_id, from_name)
             fut_to = _v2_pool.submit(_db_lid_for, to_id, to_name)
@@ -4787,45 +4840,299 @@ def api_routes():
             print(f"[WARN] routes via bahn.de: {ex}")
             errors.append(str(ex))
 
-    # ---- 2) Fallback: NASA (Mitteldeutschland) ----
-    try:
-        o_id = _nasa_id_for(from_id, from_name)
-        d_id = _nasa_id_for(to_id, to_name)
-        if not o_id or not d_id:
-            raise RuntimeError('Haltestelle nicht gefunden')
-        search = when
-        if page.startswith('nasa:'):
-            _, direction, iso = page.split(':', 2)
-            search = datetime.datetime.strptime(iso, '%Y-%m-%dT%H%M')
-        elif arrive:
-            # NASA only searches by departure: start earlier and keep the ones that arrive in time
-            search = when - datetime.timedelta(minutes=90)
-        fut = _v2_pool.submit(_nasa_connections, o_id, d_id, local_tz.localize(search), modes,
-                              max_changes, min_change)
-        conns = fut.result(timeout=18)
-        if arrive and not page:
-            ok = [c for c in conns if c.get('arr') and _parse_iso(c['arr']['iso']) and _parse_iso(c['arr']['iso']) <= when]
-            conns = ok[-5:] if ok else conns[:3]
-        if page.startswith('nasa:') and page.split(':')[1] == 'earlier' and conns:
-            # keep only those that leave before the previous first result
-            limit_dt = search + datetime.timedelta(minutes=60)
-            conns = [c for c in conns if _parse_iso(c['dep']['plannedIso']) and _parse_iso(c['dep']['plannedIso']) < limit_dt]
-        first = _parse_iso(conns[0]['dep']['plannedIso']) if conns else None
-        last = _parse_iso(conns[-1]['dep']['plannedIso']) if conns else None
-        return jsonify({
-            'source': 'nasa', 'connections': conns,
-            'earlier': f"nasa:earlier:{(first - datetime.timedelta(minutes=60)).strftime('%Y-%m-%dT%H%M')}" if first else None,
-            'later': f"nasa:later:{(last + datetime.timedelta(minutes=1)).strftime('%Y-%m-%dT%H%M')}" if last else None,
-            'from': {'name': from_name}, 'to': {'name': to_name},
-            'notice': None if db_blocked or page else 'Bundesweite Suche gerade nicht erreichbar – Ergebnisse aus dem NASA-Netz.',
-        })
-    except _V2Timeout:
-        errors.append('NASA: Zeitüberschreitung')
-    except Exception as ex:
-        print(f"[WARN] routes via NASA: {ex}")
-        errors.append(str(ex))
+    # ---- 2) bahn.de not usable: Transitous (bundesweit) and NASA (Mitteldeutschland) ----
+    ctx = dict(from_id=from_id, from_name=from_name, to_id=to_id, to_name=to_name, when=when, arrive=arrive,
+               modes=modes, max_changes=max_changes, min_change=min_change, page=page)
+    if page.startswith('tr:'):
+        order = [_routes_transitous]
+    elif page.startswith('nasa:'):
+        order = [_routes_nasa]
+    elif _both_in_nasa_area(from_id, from_name, to_id, to_name):
+        order = [_routes_nasa, _routes_transitous]
+    else:
+        order = [_routes_transitous, _routes_nasa]
+    for fn in order:
+        try:
+            res = fn(ctx)
+            if res and (res.get('connections') or page):
+                if not db_blocked and res.get('source') == 'nasa' and not page:
+                    res['notice'] = 'Bundesweite Suche gerade nicht erreichbar – Ergebnisse aus dem NASA-Netz.'
+                return jsonify(res)
+            errors.append(f'{fn.__name__}: keine Verbindung')
+        except _V2Timeout:
+            errors.append(f'{fn.__name__}: Zeitüberschreitung')
+        except Exception as ex:
+            print(f"[WARN] {fn.__name__}: {ex}")
+            errors.append(str(ex))
     return jsonify({'error': 'Verbindungssuche gerade nicht möglich. Bitte gleich nochmal versuchen.',
                     'details': errors[:3]}), 502
+
+
+# ---- NASA ----------------------------------------------------------------
+def _routes_nasa(c):
+    o_id = _nasa_id_for(c['from_id'], c['from_name'])
+    d_id = _nasa_id_for(c['to_id'], c['to_name'])
+    if not o_id or not d_id:
+        raise RuntimeError('Haltestelle im NASA-Netz nicht gefunden')
+    when, page, arrive = c['when'], c['page'], c['arrive']
+    search = when
+    if page.startswith('nasa:'):
+        _, direction, iso = page.split(':', 2)
+        search = datetime.datetime.strptime(iso, '%Y-%m-%dT%H%M')
+    elif arrive:
+        # NASA only searches by departure: start earlier and keep the ones that arrive in time
+        search = when - datetime.timedelta(minutes=90)
+    fut = _v2_pool.submit(_nasa_connections, o_id, d_id, local_tz.localize(search), c['modes'],
+                          c['max_changes'], c['min_change'])
+    conns = fut.result(timeout=18)
+    if arrive and not page:
+        ok = [x for x in conns if x.get('arr') and _parse_iso(x['arr']['iso']) and _parse_iso(x['arr']['iso']) <= when]
+        conns = ok[-5:] if ok else conns[:3]
+    if page.startswith('nasa:') and page.split(':')[1] == 'earlier' and conns:
+        limit_dt = search + datetime.timedelta(minutes=60)
+        conns = [x for x in conns if _parse_iso(x['dep']['plannedIso']) and _parse_iso(x['dep']['plannedIso']) < limit_dt]
+    first = _parse_iso(conns[0]['dep']['plannedIso']) if conns else None
+    last = _parse_iso(conns[-1]['dep']['plannedIso']) if conns else None
+    return {
+        'source': 'nasa', 'connections': conns,
+        'earlier': f"nasa:earlier:{(first - datetime.timedelta(minutes=60)).strftime('%Y-%m-%dT%H%M')}" if first else None,
+        'later': f"nasa:later:{(last + datetime.timedelta(minutes=1)).strftime('%Y-%m-%dT%H%M')}" if last else None,
+        'from': {'name': c['from_name']}, 'to': {'name': c['to_name']}, 'notice': None,
+    }
+
+
+# ---- Transitous ------------------------------------------------------------
+TR_PREFIX = 'tr|'
+NASA_AREA = (50.9, 53.1, 10.5, 13.2)    # lat min/max, lon min/max: Sachsen-Anhalt + Halle/Leipzig
+_coord_cache = {}
+
+
+def _coords_for(station_id, name):
+    sid = station_id or ''
+    if sid.startswith('tr:'):
+        info = transitous.STOP_INFO.get(transitous.stop_id(sid))
+        if info and info.get('lat') is not None:
+            return info['lat'], info['lon']
+    if sid.startswith('db:'):
+        m = re.search(r'@X=(-?\d+)@Y=(-?\d+)@', sid)
+        if m:
+            return int(m.group(2)) / 1e6, int(m.group(1)) / 1e6
+    key = (sid, name)
+    if key in _coord_cache:
+        return _coord_cache[key]
+    res = None
+    if nasa_client and (name or sid):
+        try:
+            locs = nasa_client.locations(name or sid) or []
+            loc = next((l for l in locs if not sid or str(l.id) == sid), locs[0] if locs else None)
+            if loc is not None and getattr(loc, 'latitude', None) is not None:
+                res = (float(loc.latitude), float(loc.longitude))
+        except Exception:
+            res = None
+    _coord_cache[key] = res
+    return res
+
+
+def _in_nasa_area(pt):
+    if not pt:
+        return False
+    lat, lon = pt
+    return NASA_AREA[0] <= lat <= NASA_AREA[1] and NASA_AREA[2] <= lon <= NASA_AREA[3]
+
+
+def _both_in_nasa_area(fid, fname, tid, tname):
+    if (fid or '').startswith('tr:') or (tid or '').startswith('tr:'):
+        return False
+    return _in_nasa_area(_coords_for(fid, fname)) and _in_nasa_area(_coords_for(tid, tname))
+
+
+def _tr_place_for(station_id, name):
+    if (station_id or '').startswith('tr:'):
+        return transitous.stop_id(station_id), name
+    best = transitous.resolve(name or station_id)
+    if best:
+        return transitous.stop_id(best['id']), best['name']
+    pt = _coords_for(station_id, name)
+    if pt:
+        return f'{pt[0]},{pt[1]}', name
+    return None, name
+
+
+def _tr_style(obj, *names):
+    vtype = transitous.TYPE_OF.get(obj.get('mode') or '', 'bus')
+    lab = transitous.label(obj)
+    agency = obj.get('agencyName') or ''
+    mvb = vtype in ('tram', 'bus') and ('magdeburger verkehrsbetriebe' in agency.lower() or
+                                       (_is_magdeburg(*names) and 'magdeburg' in agency.lower()))
+    if mvb:
+        color = get_line_color(('Str ' if vtype == 'tram' else 'Bus ') + lab, 'MVB')
+        if vtype == 'bus':
+            try:
+                if 40 <= int(re.sub(r'\D', '', lab) or 0) <= 49:
+                    vtype = 'sev'
+            except ValueError:
+                pass
+    else:
+        color = transitous.color(obj)
+        if not color and vtype == 'regional' and ('ostdeutsche eisenbahn' in agency.lower() or 'odeg' in agency.lower()):
+            color = '#2C6930'
+        color = color or GENERIC_PRODUCT_COLORS.get(vtype, '#5F7D95')
+    line = f'Str {lab}' if vtype == 'tram' else (f'Bus {lab}' if vtype in ('bus', 'sev') else lab)
+    return {'label': lab, 'line': line, 'type': vtype, 'color': color, 'textColor': _text_color(color),
+            'operator': 'MVB' if mvb else (agency or None), 'mvb': mvb}
+
+
+def _tr_point(place, kind, realtime_flag=True):
+    place = place or {}
+    if kind == 'dep':
+        p = transitous.parse(place.get('scheduledDeparture') or place.get('departure'))
+        r = transitous.parse(place.get('departure')) if realtime_flag and place.get('departure') else None
+    else:
+        p = transitous.parse(place.get('scheduledArrival') or place.get('arrival'))
+        r = transitous.parse(place.get('arrival')) if realtime_flag and place.get('arrival') else None
+    return _point(p, r, _short_stop(place.get('name')), place.get('scheduledTrack') or place.get('track'),
+                  place.get('track'), place.get('cancelled'))
+
+
+def _tr_connection(it):
+    legs = []
+    for lg in it.get('legs') or []:
+        mode = lg.get('mode')
+        rt = bool(lg.get('realTime'))
+        if mode == 'WALK' or mode in ('BIKE', 'CAR', 'RENTAL', 'FLEX'):
+            f, t = _tr_point(lg.get('from'), 'dep', rt), _tr_point(lg.get('to'), 'arr', rt)
+            legs.append({'kind': 'walk', 'from': f, 'to': t, 'durationMin': round((lg.get('duration') or 0) / 60),
+                         'distance': round(lg['distance']) if lg.get('distance') else None})
+            continue
+        st = _tr_style(lg, (lg.get('from') or {}).get('name'), (lg.get('to') or {}).get('name'))
+        stops = []
+        for s2 in lg.get('intermediateStops') or []:
+            p = transitous.parse(s2.get('scheduledDeparture') or s2.get('scheduledArrival') or s2.get('departure'))
+            r = transitous.parse(s2.get('departure') or s2.get('arrival')) if rt else None
+            stops.append({'name': _short_stop(s2.get('name')), 'planned': _hm(p), 'rt': _hm(r) if r else None,
+                          'delay': dbweb.delay_of(p, r), 'cancelled': bool(s2.get('cancelled'))})
+        attrs = []
+        if lg.get('bikesAllowed'):
+            attrs.append('Fahrradmitnahme möglich')
+        if lg.get('wheelchairAccessible') == 'ACCESSIBLE':
+            attrs.append('Barrierefreies Fahrzeug')
+        legs.append({
+            'kind': 'transit', 'src': 'tr',
+            'journeyId': TR_PREFIX + lg['tripId'] if lg.get('tripId') else None,
+            'line': st['line'], 'label': st['label'], 'type': st['type'], 'color': st['color'],
+            'textColor': st['textColor'], 'operator': st['operator'], 'mvb': st['mvb'],
+            'direction': _short_stop(lg.get('headsign') or (lg.get('tripTo') or {}).get('name') or (lg.get('to') or {}).get('name')),
+            'from': _tr_point(lg.get('from'), 'dep', rt), 'to': _tr_point(lg.get('to'), 'arr', rt),
+            'stops': stops, 'durationMin': round((lg.get('duration') or 0) / 60),
+            'notes': [], 'attrs': attrs, 'cancelled': bool(lg.get('cancelled')),
+        })
+    return _finish_connection({'id': it.get('id', '')[:40], 'source': 'tr', 'legs': legs, 'price': None,
+                               'durationMin': round((it.get('duration') or 0) / 60)})
+
+
+def _routes_transitous(c):
+    page = c['page']
+    cursor = page[3:] if page.startswith('tr:') else None
+    f_place, f_name = _tr_place_for(c['from_id'], c['from_name'])
+    t_place, t_name = _tr_place_for(c['to_id'], c['to_name'])
+    if not f_place or not t_place:
+        raise RuntimeError('Haltestelle bei Transitous nicht gefunden')
+    data = transitous.plan(f_place, t_place, c['when'], arrive=c['arrive'], modes=transitous.modes_for(c['modes']),
+                           max_transfers=None if c['max_changes'] < 0 else c['max_changes'],
+                           min_transfer=c['min_change'] or None, cursor=cursor)
+    conns = []
+    for it in data.get('itineraries') or []:
+        try:
+            conns.append(_tr_connection(it))
+        except Exception as ex:
+            print(f"[WARN] transitous parse: {ex}")
+    conns.sort(key=lambda x: (x['dep'] or {}).get('plannedIso') or '')
+    return {
+        'source': 'tr', 'connections': conns,
+        'earlier': ('tr:' + data['previousPageCursor']) if data.get('previousPageCursor') else None,
+        'later': ('tr:' + data['nextPageCursor']) if data.get('nextPageCursor') else None,
+        'from': {'name': f_name or c['from_name']}, 'to': {'name': t_name or c['to_name']}, 'notice': None,
+    }
+
+
+def _tr_departure_item(s, station_name, idx):
+    st = _tr_style(s, station_name)
+    place = s.get('place') or {}
+    rt = bool(s.get('realTime'))
+    planned = transitous.parse(place.get('scheduledDeparture') or place.get('departure'))
+    real = transitous.parse(place.get('departure')) if rt and place.get('departure') else None
+    delay = dbweb.delay_of(planned, real)
+    cancelled = bool(s.get('cancelled') or s.get('tripCancelled') or place.get('cancelled'))
+    time_str = _hm(planned) or ''
+    jid = TR_PREFIX + s['tripId'] if s.get('tripId') else f"mock_j_{st['label']}_{time_str.replace(':', '')}_{idx}"
+    today = datetime.datetime.now(local_tz).date()
+    return {
+        'id': jid, 'journey_id': jid, 'line': st['line'], 'raw_line': st['line'],
+        'direction': _short_stop(s.get('headsign') or (s.get('tripTo') or {}).get('name') or ''),
+        'originalDirection': None, 'isDiverted': False, 'diversion': None, 'diversionInfo': None,
+        'time': time_str, 'delay': delay, 'type': st['type'], 'isSEV': st['type'] == 'sev',
+        'sevInfo': 'Schienenersatzverkehr' if st['type'] == 'sev' else None,
+        'day_offset': max(0, (planned.date() - today).days) if planned else 0,
+        'cancelled': cancelled, 'lineColor': st['color'],
+        'realtimeStatus': _realtime_status(delay, cancelled),
+        'estimatedTime': _hm(real) if (delay not in (None, 0)) else None,
+        'platform': place.get('track') or place.get('scheduledTrack') or '',
+        'operator': st['operator'], 'src': 'tr',
+    }
+
+
+def _tr_departures_response(station_id):
+    sid = transitous.stop_id(station_id)
+    try:
+        duration = max(15, min(240, int(request.args.get('duration', '60'))))
+    except ValueError:
+        duration = 60
+    try:
+        when = datetime.datetime.strptime(f"{request.args.get('date')} {request.args.get('time')}", '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        when = datetime.datetime.now(local_tz).replace(tzinfo=None, second=0, microsecond=0)
+    name = request.args.get('station_name', '') or (transitous.STOP_INFO.get(sid) or {}).get('name', '')
+    try:
+        entries = transitous.stoptimes(sid, when, duration)
+    except Exception as ex:
+        print(f"[WARN] transitous departures: {ex}")
+        return jsonify({"error": "Abfahrten gerade nicht erreichbar"}), 502
+    items = [_tr_departure_item(e, name, i) for i, e in enumerate(entries)]
+    items.sort(key=lambda d: (d['day_offset'], d['time']))
+    return jsonify(items)
+
+
+def _tr_trip(jid, line_hint=None):
+    data = transitous.trip(jid[len(TR_PREFIX):])
+    leg = (data.get('legs') or [{}])[0]
+    rt = bool(leg.get('realTime'))
+    now = datetime.datetime.now(local_tz).replace(tzinfo=None)
+    places = [leg.get('from') or {}] + list(leg.get('intermediateStops') or []) + [leg.get('to') or {}]
+    stops = []
+    for pl in places:
+        a_p = transitous.parse(pl.get('scheduledArrival') or pl.get('arrival'))
+        a_r = transitous.parse(pl.get('arrival')) if rt and pl.get('arrival') else None
+        d_p = transitous.parse(pl.get('scheduledDeparture') or pl.get('departure'))
+        d_r = transitous.parse(pl.get('departure')) if rt and pl.get('departure') else None
+        p, r = d_p or a_p, d_r or a_r
+        ref = (d_r or d_p) or (a_r or a_p)
+        stops.append({'name': _short_stop(pl.get('name')), 'time': _hm(p) or '', 'rt': _hm(r) if r else None,
+                      'delay': dbweb.delay_of(p, r), 'passed': bool(ref and ref < now),
+                      'arr': _hm(a_p), 'arrRt': _hm(a_r) if a_r else None, 'arrDelay': dbweb.delay_of(a_p, a_r),
+                      'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
+                      'platform': pl.get('track') or pl.get('scheduledTrack') or '',
+                      'cancelled': bool(pl.get('cancelled')), 'lat': pl.get('lat'), 'lon': pl.get('lon'),
+                      'day_offset': max(0, (p.date() - now.date()).days) if p else 0})
+    st = _tr_style(leg, *(x.get('name') for x in places[:2]))
+    return {'id': jid, 'line': line_hint or st['line'], 'short': st['label'], 'type': st['type'], 'color': st['color'],
+            'direction': _short_stop(leg.get('headsign') or (places[-1].get('name') if places else '')),
+            'stops': stops, 'shape': [], 'cancelled': bool(leg.get('cancelled')), 'operator': st['operator'],
+            'messages': []}
+
+
+def _tr_journey_response(jid, station_name, line_hint=None, direction_hint=None, color_hint=None):
+    trip = _tr_trip(jid, line_hint)
+    return _trip_to_journey_response(trip, station_name, line_hint, direction_hint, color_hint, 'tr')
 
 
 # ---------------------------------------------------------------------------

@@ -597,7 +597,7 @@
             line: l.line, label: l.label, direction: l.direction,
             time: l.from.planned, delay: l.from.delay || 0, lineColor: l.color, type: l.type,
             operator: l.operator, station_name: l.from.name, boardStop: l.from.name, alightStop: l.to.name,
-            date: (l.from.plannedIso || '').slice(0, 10), matchMvb: l.src === 'db' && !!l.mvb,
+            date: (l.from.plannedIso || '').slice(0, 10), matchMvb: (l.src === 'db' || l.src === 'tr') && !!l.mvb,
             _legIndex: i,
         }));
         deps.forEach((d, k) => { d.tripLegs = deps; d.tripLegIndex = k; d.tripConn = c; });
