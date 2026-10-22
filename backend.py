@@ -4472,14 +4472,15 @@ def _db_trip(jid, line_hint=None):
     now = datetime.datetime.now(local_tz).replace(tzinfo=None)
     names = [h.get('name') for h in halte]
     stops = []
-    first_vm = None
     for h in halte:
         a_p, a_r = dbweb.parse_dt((h.get('ankunft') or {}).get('sollzeit')), dbweb.parse_dt((h.get('ankunft') or {}).get('echtzeit'))
         d_p, d_r = dbweb.parse_dt((h.get('abfahrt') or {}).get('sollzeit')), dbweb.parse_dt((h.get('abfahrt') or {}).get('echtzeit'))
         p, r = d_p or a_p, d_r or a_r
-        ref = r or p
+        ref = (d_r or d_p) or (a_r or a_p)
         stops.append({'name': _short_stop(h.get('name')), 'time': _hm(p) or '', 'rt': _hm(r) if r else None,
                       'delay': dbweb.delay_of(p, r), 'passed': bool(ref and ref < now),
+                      'arr': _hm(a_p), 'arrRt': _hm(a_r) if a_r else None, 'arrDelay': dbweb.delay_of(a_p, a_r),
+                      'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
                       'platform': h.get('ezGleis') or h.get('gleis') or '',
                       'cancelled': bool(h.get('cancelled')), 'lat': None, 'lon': None,
                       'day_offset': max(0, (p.date() - now.date()).days) if p else 0})
@@ -4503,13 +4504,20 @@ def _db_journey_response(jid, station_name, line_hint=None, direction_hint=None,
     trip = _db_trip(jid, line_hint)
     stops = []
     vehicle_pos = 0
+    last = len(trip['stops']) - 1
     for i, s in enumerate(trip['stops']):
-        delay = s['delay']
+        # the vehicle animation uses time + delay: departure everywhere, arrival at the terminus
+        use_arr = i == last and s.get('arr')
+        t = s.get('arr') if use_arr else (s.get('dep') or s['time'])
+        d = s.get('arrDelay') if use_arr else (s.get('depDelay') if s.get('dep') else s.get('arrDelay'))
         stops.append({
-            'name': s['name'], 'time': s['time'], 'delay': delay if delay is not None else 0,
-            'hasRealtime': delay is not None, 'passed': s['passed'], 'platform': s['platform'],
+            'name': s['name'], 'time': t, 'delay': d if d is not None else 0,
+            'hasRealtime': d is not None, 'passed': s['passed'], 'platform': s['platform'],
             'cancelled': s['cancelled'], 'day_offset': s['day_offset'],
-            'estimatedTime': s['rt'] if (delay not in (None, 0)) else None,
+            # separate arrival/departure so the timeline shows both (and their delays)
+            'arrTime': s.get('arr') if i > 0 else None, 'arrDelay': s.get('arrDelay') if i > 0 else None,
+            'depTime': s.get('dep') if i < last else None, 'depDelay': s.get('depDelay') if i < last else None,
+            'estimatedTime': (s.get('arrRt') if use_arr else s.get('depRt')) if (d not in (None, 0)) else None,
             'isVehicleHere': False, 'isRequestStop': False, 'requestStopNote': None,
         })
         if s['passed']:

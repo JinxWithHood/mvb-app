@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10.1">
+  <link rel="stylesheet" href="styles.css?v=10.2">
 </head>
 <body>
   <!-- SVG Icon Sprite -->
@@ -1033,17 +1033,18 @@
   <script src="season.js?v=1.0"></script>
   <script src="push.js?v=8.0"></script>
   <script src="settings.js?v=1.1"></script>
-  <script src="app.js?v=9.1"></script>
-  <script src="routes.js?v=1.1"></script>
+  <script src="app.js?v=9.2"></script>
+  <script src="routes.js?v=1.2"></script>
   <script>
-    // Failsafe: Ladebildschirm spätestens nach 4 Sekunden entfernen
+    // Failsafe: if the app script never took over the loading screen (e.g. a crash), remove it after 8 s.
+    // Otherwise the app itself decides – it only leaves the screen once the server answers (or shows an error).
     setTimeout(function () {
       var scr = document.getElementById('app-loading-screen');
-      if (scr) {
+      if (scr && !window.__mvbBootGate) {
         scr.classList.add('fade-out');
         setTimeout(function () { if (scr && scr.parentNode) scr.parentNode.removeChild(scr); }, 500);
       }
-    }, 6000);
+    }, 8000);
   </script>
 </body>
 </html>

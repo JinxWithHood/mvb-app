@@ -1394,12 +1394,12 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Abfahrtsladefehler:', err);
             departuresLoading.hidden = true;
             if (!silent) {
-                departuresList.innerHTML = '<div class="error-card glass-card">Die Abfahrten konnten nicht geladen werden.</div>';
+                departuresList.innerHTML = `<div class="error-card glass-card board-error"><strong>Die Abfahrten konnten nicht geladen werden.</strong><button type="button" class="routes-retry">Nochmal versuchen</button></div>`;
+                const rb = departuresList.querySelector('.routes-retry');
+                if (rb) rb.addEventListener('click', () => fetchDepartures());
             }
-            if (isInitialLoad) {
-                isInitialLoad = false;
-                hideLoadingScreen();
-            }
+            // the loading screen is handled by the boot gate (server check) – no early hide on errors
+            isInitialLoad = false;
         }
     }
 
@@ -1939,7 +1939,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.style.setProperty('--from', fromColor || 'var(--text-muted)');
         el.style.setProperty('--to', toColor || 'var(--text-muted)');
         el.innerHTML = `<span class="trip-transition-line" aria-hidden="true"></span>
-            <span class="trip-transition-icon" aria-hidden="true"><svg class="ico"><use href="#${cls.includes('warn') || cls.includes('bad') ? 'i-alert' : 'i-walk'}"/></svg></span>
+            <span class="trip-transition-icon" aria-hidden="true"><svg class="ico"><use href="#${cls.includes('warn') || cls.includes('bad') ? 'i-alert' : (item.kind === 'transfer' && !item.walkMin ? 'i-swap' : 'i-walk')}"/></svg></span>
             <span class="trip-transition-text">${text}</span>`;
         return el;
     }
@@ -3675,8 +3675,54 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Dismiss fullscreen loading screen smoothly once initialization is complete
-    setTimeout(() => {
-        hideLoadingScreen();
-    }, 200);
+    // Boot gate: only leave the loading screen once the server answers – otherwise fail right there
+    function showBootError(offline) {
+        const scr = document.getElementById('app-loading-screen');
+        if (!scr) return;
+        if (loadingStatusInterval) { clearInterval(loadingStatusInterval); loadingStatusInterval = null; }
+        scr.classList.add('boot-error');
+        const box = scr.querySelector('.loading-container');
+        let panel = scr.querySelector('.boot-error-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'boot-error-panel';
+            panel.setAttribute('role', 'alert');
+            (box || scr).appendChild(panel);
+        }
+        panel.innerHTML = `
+            <div class="boot-error-icon" aria-hidden="true">${offline ? '📡' : '🔌'}</div>
+            <h2>${offline ? 'Du bist offline' : 'Keine Verbindung zum Server'}</h2>
+            <p>${offline ? 'Sobald du wieder Netz hast, geht\'s weiter.' : 'Der Server antwortet gerade nicht. Prüf dein Internet oder versuch es gleich nochmal.'}</p>
+            <div class="boot-error-actions">
+                <button type="button" class="boot-retry">Nochmal versuchen</button>
+                <button type="button" class="boot-skip">Trotzdem öffnen</button>
+            </div>`;
+        panel.querySelector('.boot-retry').addEventListener('click', () => location.reload());
+        panel.querySelector('.boot-skip').addEventListener('click', () => {
+            scr.classList.add('fade-out');
+            setTimeout(() => scr.remove(), 500);
+        });
+        if (offline) window.addEventListener('online', () => location.reload(), { once: true });
+    }
+
+    async function bootCheck() {
+        if (navigator.onLine === false) { showBootError(true); return; }
+        const tries = [20000, 20000, 25000];
+        for (let i = 0; i < tries.length; i++) {
+            const ctrl = 'AbortController' in window ? new AbortController() : null;
+            const timer = ctrl ? setTimeout(() => ctrl.abort(), tries[i]) : null;
+            try {
+                const res = await fetch(`${API_BASE}/status?_=${Date.now()}`, { signal: ctrl ? ctrl.signal : undefined });
+                if (timer) clearTimeout(timer);
+                if (res.ok || res.status === 404) { hideLoadingScreen(); return; }
+            } catch (e) {
+                if (timer) clearTimeout(timer);
+                if (navigator.onLine === false) { showBootError(true); return; }
+            }
+            if (i < tries.length - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+        showBootError(false);
+    }
+    window.__mvbBootGate = true;
+    bootCheck();
 });

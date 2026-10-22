@@ -65,7 +65,7 @@
     function delayTag(pt) {
         if (!pt) return '';
         if (pt.cancelled) return '<span class="rt-tag bad">fällt aus</span>';
-        if (pt.delay == null) return '<span class="rt-tag none" title="Noch keine Echtzeitdaten">Plan</span>';
+        if (pt.delay == null) return '';
         if (pt.delay >= 3) return `<span class="rt-tag warn">+${pt.delay} Min</span>`;
         if (pt.delay > 0) return `<span class="rt-tag mild">+${pt.delay}</span>`;
         if (pt.delay < 0) return `<span class="rt-tag early">${pt.delay}</span>`;
@@ -381,6 +381,7 @@
             <button type="button" class="route-summary" aria-expanded="${open}">
                 <span class="route-times">${timeHtml(c.dep, true)}<span class="route-arrow" aria-hidden="true">→</span>${timeHtml(c.arr, true)}</span>
                 <span class="route-meta">${esc(fmtDur(c.durationMin))} · ${esc(fmtTransfers(c.transfers))}${countdown ? ' · ' + countdown : ''}</span>
+                ${fromLine(c)}
                 <span class="route-badges">${badges.join('')}</span>
                 ${bar(c)}
                 <span class="route-toggle-hint"><span>${open ? 'Weniger' : 'Details'}</span><span class="chev" aria-hidden="true">▾</span></span>
@@ -399,6 +400,15 @@
         return el;
     }
 
+    function fromLine(c) {
+        const first = (c.legs || []).find(l => l.kind === 'transit');
+        if (!first) return '';
+        const walk = c.legs[0] && c.legs[0].kind === 'walk' ? c.legs[0] : null;
+        const plat = first.from.rtPlatform || first.from.platform;
+        const platTxt = plat ? ` · ${/^[A-Za-z]$/.test(plat) ? 'Steig' : 'Gl.'} ${esc(plat)}` : '';
+        return `<span class="route-from">${walk ? `<span class="rf-walk">🚶 ${esc(walk.durationMin)} Min zu</span> ` : ''}${lineBadge(first, true)} ab <strong>${esc(shortName(first.from.name))}</strong>${platTxt}</span>`;
+    }
+
     function bar(c) {
         const parts = [];
         c.legs.forEach(l => {
@@ -414,77 +424,139 @@
         return `<span class="route-bar" aria-hidden="true">${parts.join('')}</span>`;
     }
 
+    function normName(n) {
+        return shortName(n).toLowerCase().replace(/\s*\((tram|bus|tram\/bus)\)/g, '').replace(/[^a-z0-9äöüß]/g, '');
+    }
+
+    /* Timeline rows: [time | rail | content]. The rail draws the coloured ride segments and the dotted walks,
+       a transfer at the very same stop merges arrival + departure into one node. */
     function details(c) {
-        const out = [];
-        c.legs.forEach((l, i) => {
-            if (l.kind === 'transit') out.push(legHtml(l, i));
-            else if (l.kind === 'transfer') out.push(transferHtml(l));
-            else if (l.kind === 'walk') out.push(walkHtml(l));
-        });
-        const transit = c.legs.filter(l => l.kind === 'transit');
+        const items = c.legs || [];
+        const rows = [];
+        let prevSeg = null;        // what the rail above the next stop looks like
+        let pending = null;        // arrival merged into the next departure (same-stop transfer)
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (it.kind === 'transit') {
+                rows.push(stopRow({ name: it.from.name, dep: it.from, arr: pending && pending.pt, transfer: pending && pending.tr,
+                    top: prevSeg, bottom: { color: it.color }, cancelled: it.cancelled }));
+                rows.push(rideRow(it, i));
+                pending = null;
+                const tr = items[i + 1], nxt = items[i + 2];
+                const sameStop = tr && tr.kind === 'transfer' && nxt && nxt.kind === 'transit' &&
+                    normName(it.to.name) === normName(nxt.from.name);
+                if (sameStop) {
+                    pending = { pt: it.to, tr };
+                    prevSeg = { color: it.color };
+                    i += 1;            // the transfer is shown inside the merged stop
+                    continue;
+                }
+                const after = items[i + 1];
+                rows.push(stopRow({ name: it.to.name, arr: it.to, top: { color: it.color },
+                    bottom: after ? { walk: true } : null, last: !after }));
+                prevSeg = after ? { walk: true } : null;
+            } else {
+                rows.push(walkRow(it));
+                prevSeg = { walk: true };
+                if (i === 0) rows.unshift(stopRow({ name: it.from.name, dep: it.from, top: null, bottom: { walk: true }, start: true }));
+                if (i === items.length - 1) rows.push(stopRow({ name: it.to.name, arr: it.to, top: { walk: true }, bottom: null, last: true }));
+            }
+        }
+        const transit = items.filter(l => l.kind === 'transit');
+        const out = [`<div class="tl">${rows.join('')}</div>`];
         out.push(`<div class="route-actions">
             <button type="button" class="route-action primary" data-act="follow"${transit.some(l => l.journeyId) ? '' : ' disabled'}><span class="live-dot" aria-hidden="true"></span>Fahrt verfolgen</button>
             <button type="button" class="route-action" data-act="share"><svg class="ico" aria-hidden="true"><use href="#i-share"/></svg>Teilen</button>
             <button type="button" class="route-action" data-act="return"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg>Rückfahrt</button>
         </div>`);
         if (c.price) {
-            out.push(`<p class="route-foot">${c.price.partial ? 'Teilpreis' : 'Normalpreis'} 2. Klasse laut bahn.de: <strong>${esc(fmtPrice(c.price))}</strong>. Nicht mit dem Deutschlandticket nutzbar (Fernverkehr).</p>`);
+            out.push(`<p class="route-foot">${c.price.partial ? 'Teilpreis' : 'Normalpreis'} 2. Klasse laut bahn.de: <strong>${esc(fmtPrice(c.price))}</strong> · nicht mit dem Deutschlandticket (Fernverkehr).</p>`);
         }
         if (c.source === 'nasa') out.push('<p class="route-foot">Quelle: NASA (Mitteldeutschland).</p>');
         return out.join('');
     }
 
-    function legHtml(l, i) {
+    function railHtml(top, bottom, dotColor, opts) {
+        opts = opts || {};
+        const seg = (sg, pos) => !sg ? '' : sg.walk
+            ? `<span class="tl-seg ${pos} walk"></span>`
+            : `<span class="tl-seg ${pos}" style="--c:${esc(sg.color)}"></span>`;
+        const dotStyle = opts.split
+            ? `style="--c:${esc(opts.split[0])};--c2:${esc(opts.split[1])}"`
+            : `style="--c:${esc(dotColor || 'var(--text-muted)')}"`;
+        return `<div class="tl-rail">${seg(top, 'top')}${seg(bottom, 'bottom')}<span class="tl-dot${opts.split ? ' split' : ''}${opts.end ? ' end' : ''}" ${dotStyle}></span></div>`;
+    }
+
+    function stopRow(o) {
+        const dotColor = (o.bottom && o.bottom.color) || (o.top && o.top.color) || null;
+        const split = o.arr && o.dep && o.top && o.top.color && o.bottom && o.bottom.color && o.top.color !== o.bottom.color
+            ? [o.top.color, o.bottom.color] : null;
+        let time;
+        if (o.arr && o.dep) {
+            time = `<span class="tl-arr">an ${esc(o.arr.rt || o.arr.planned)}</span>${timeHtml(o.dep)}`;
+        } else {
+            time = timeHtml(o.dep || o.arr);
+        }
+        const pt = o.dep || o.arr;
+        let transfer = '';
+        if (o.transfer) {
+            const t = o.transfer;
+            const cls = t.broken ? 'bad' : (t.risky ? 'warn' : '');
+            const txt = t.broken ? 'Anschluss wahrscheinlich weg' : (t.risky ? `Umsteigen · nur ${t.bufferMin} Min – knapp!` : `Umsteigen · ${t.bufferMin != null ? t.bufferMin + ' Min' : 'gleicher Halt'}`);
+            transfer = `<span class="tl-transfer ${cls}"><svg class="ico" aria-hidden="true"><use href="#${cls ? 'i-alert' : 'i-swap'}"/></svg>${esc(txt)}</span>`;
+        }
+        const tag = o.last ? '<span class="tl-goal">Ziel</span>' : (o.start ? '<span class="tl-goal start">Start</span>' : '');
+        return `<div class="tl-row tl-stop${o.cancelled ? ' cancelled' : ''}">
+            <div class="tl-time">${time}</div>
+            ${railHtml(o.top, o.bottom, dotColor, { split, end: o.last })}
+            <div class="tl-body"><div class="tl-stopline"><strong>${esc(o.name)}</strong>${platformTag(pt)}${delayTag(pt)}${tag}</div>${transfer}</div>
+        </div>`;
+    }
+
+    function rideRow(l, i) {
         const stops = l.stops || [];
-        const notes = (l.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
-        const attrs = (l.attrs || []).length ? `<span class="rl-attrs">${(l.attrs || []).map(esc).join(' · ')}</span>` : '';
-        return `<div class="route-leg${l.cancelled ? ' cancelled' : ''}" style="--leg:${esc(l.color)}">
-            <div class="rl-row">
-                <div class="rl-time">${timeHtml(l.from)}</div>
-                <div class="rl-dot start" aria-hidden="true"></div>
-                <div class="rl-stop"><strong>${esc(l.from.name)}</strong>${platformTag(l.from)}${delayTag(l.from)}</div>
-            </div>
-            <div class="rl-body">
-                <div class="rl-line-info">
-                    ${lineBadge(l)}
-                    <span class="rl-dir">Richtung ${esc(l.direction)}</span>
-                    <span class="rl-sub">${esc(TYPE_NAMES[l.type] || '')}${l.operator ? ' · ' + esc(l.operator) : ''} · ${esc(fmtDur(l.durationMin))}</span>
-                </div>
-                ${stops.length ? `<button type="button" class="rl-stops-toggle" aria-expanded="false">${stops.length} Zwischenhalt${stops.length > 1 ? 'e' : ''} <span aria-hidden="true">▾</span></button>
-                <ol class="rl-stops" hidden>${stops.map(s => `<li${s.cancelled ? ' class="cancelled"' : ''}><span class="ls-time">${esc(s.rt || s.planned || '')}</span><span class="ls-name">${esc(s.name)}</span>${s.delay > 0 ? `<span class="ls-delay">+${s.delay}</span>` : ''}</li>`).join('')}</ol>` : ''}
-                ${notes ? `<ul class="rl-notes">${notes}</ul>` : ''}
+        const notes = l.notes || [];
+        const attrs = (l.attrs || []).length ? `<span class="tl-attrs">${(l.attrs || []).map(esc).join(' · ')}</span>` : '';
+        const noteHtml = notes.length ? `<div class="tl-notes"><p>${esc(notes[0])}</p>${notes.length > 1 || notes[0].length > 90 ? '<button type="button" class="tl-more">mehr</button>' : ''}${notes.slice(1).map(n => `<p class="extra">${esc(n)}</p>`).join('')}</div>` : '';
+        return `<div class="tl-row tl-ride${l.cancelled ? ' cancelled' : ''}">
+            <div class="tl-time"><span class="tl-dur">${esc(fmtDur(l.durationMin))}</span></div>
+            <div class="tl-rail"><span class="tl-seg full" style="--c:${esc(l.color)}"></span></div>
+            <div class="tl-body">
+                <div class="tl-line">${lineBadge(l)}<span class="tl-dir">${esc(l.direction || '')}</span></div>
+                <span class="tl-sub">${esc(TYPE_NAMES[l.type] || '')}${l.operator ? ' · ' + esc(l.operator) : ''}</span>
+                ${stops.length ? `<button type="button" class="tl-stops-toggle" aria-expanded="false">${stops.length} Zwischenhalt${stops.length > 1 ? 'e' : ''}<span aria-hidden="true">▾</span></button>
+                <ol class="tl-stops" hidden>${stops.map(st => `<li${st.cancelled ? ' class="cancelled"' : ''}><span class="ls-time">${esc(st.rt || st.planned || '')}</span><span class="ls-name">${esc(st.name)}</span>${st.delay > 0 ? `<span class="ls-delay">+${st.delay}</span>` : ''}</li>`).join('')}</ol>` : ''}
+                ${noteHtml}
                 ${attrs}
-                ${l.journeyId ? `<button type="button" class="rl-live-btn" data-leg="${i}"><span class="live-dot" aria-hidden="true"></span>Ganzer Linienverlauf</button>` : ''}
-            </div>
-            <div class="rl-row">
-                <div class="rl-time">${timeHtml(l.to)}</div>
-                <div class="rl-dot end" aria-hidden="true"></div>
-                <div class="rl-stop"><strong>${esc(l.to.name)}</strong>${platformTag(l.to)}</div>
+                ${l.journeyId ? `<button type="button" class="tl-line-btn" data-leg="${i}"><svg class="ico" aria-hidden="true"><use href="#i-route"/></svg>Ganzer Linienverlauf</button>` : ''}
             </div>
         </div>`;
     }
 
-    function transferHtml(t) {
-        const cls = t.broken ? 'bad' : (t.risky ? 'warn' : '');
+    function walkRow(w) {
+        const isTransfer = w.kind === 'transfer';
+        const mins = isTransfer ? w.walkMin : w.durationMin;
+        const cls = isTransfer ? (w.broken ? ' bad' : (w.risky ? ' warn' : '')) : '';
         let text;
-        if (t.inStation) text = t.walkMin ? `Umstieg · ${t.walkMin} Min Fußweg im Bahnhof` : 'Umstieg am selben Halt';
-        else text = `Umstieg · Fußweg${t.distance ? ' ' + t.distance + ' m' : ''} · ${t.walkMin} Min`;
-        let buffer = '';
-        if (t.bufferMin != null) {
-            if (t.broken) buffer = ' · Anschluss wahrscheinlich weg';
-            else if (t.risky) buffer = ` · nur ${t.bufferMin} Min Puffer – knapp!`;
-            else buffer = ` · ${t.bufferMin} Min Puffer`;
+        if (isTransfer) {
+            text = w.inStation ? `Umsteigen im Bahnhof${mins ? ' · ' + mins + ' Min Fußweg' : ''}` : `Fußweg${w.distance ? ' ' + w.distance + ' m' : ''}${mins ? ' · ' + mins + ' Min' : ''}`;
+            if (!w.inStation && w.at) text += ` zu ${shortName(w.at)}`;
+        } else {
+            text = `Fußweg${w.distance ? ' ' + w.distance + ' m' : ''} · ${w.durationMin} Min`;
         }
-        if (t.at && t.fromStop && shortName(t.at) !== shortName(t.fromStop) && !t.inStation) text += ` zu ${esc(t.at)}`;
-        return `<div class="route-transfer ${cls}"><svg class="ico" aria-hidden="true"><use href="#${cls ? 'i-alert' : 'i-walk'}"/></svg><span>${text}${esc(buffer)}</span></div>`;
-    }
-
-    function walkHtml(w) {
-        return `<div class="route-transfer walk"><svg class="ico" aria-hidden="true"><use href="#i-walk"/></svg><span>Fußweg${w.distance ? ' ' + esc(w.distance) + ' m' : ''} · ${esc(w.durationMin)} Min · ${esc(w.from.name)} → ${esc(w.to.name)}</span></div>`;
+        let buffer = '';
+        if (isTransfer && w.bufferMin != null) {
+            buffer = w.broken ? 'Anschluss wahrscheinlich weg' : (w.risky ? `nur ${w.bufferMin} Min Puffer – knapp!` : `${w.bufferMin} Min Puffer`);
+        }
+        return `<div class="tl-row tl-walk${cls}">
+            <div class="tl-time"><span class="tl-dur">${mins ? esc(mins + ' Min') : ''}</span></div>
+            <div class="tl-rail"><span class="tl-seg full walk"></span><span class="tl-walk-icon"><svg class="ico" aria-hidden="true"><use href="#${cls ? 'i-alert' : 'i-walk'}"/></svg></span></div>
+            <div class="tl-body"><span class="tl-walktext">${esc(text)}</span>${buffer ? `<span class="tl-buffer">${esc(buffer)}</span>` : ''}</div>
+        </div>`;
     }
 
     function wireDetails(el, c) {
-        el.querySelectorAll('.rl-stops-toggle').forEach(b => {
+        el.querySelectorAll('.tl-stops-toggle').forEach(b => {
             b.addEventListener('click', () => {
                 const ol = b.nextElementSibling;
                 const openNow = ol.hidden;
@@ -493,7 +565,15 @@
                 b.classList.toggle('open', openNow);
             });
         });
-        el.querySelectorAll('.rl-live-btn').forEach(b => {
+        el.querySelectorAll('.tl-more').forEach(b => {
+            b.addEventListener('click', () => {
+                const box = b.closest('.tl-notes');
+                const open = !box.classList.contains('open');
+                box.classList.toggle('open', open);
+                b.textContent = open ? 'weniger' : 'mehr';
+            });
+        });
+        el.querySelectorAll('.tl-line-btn').forEach(b => {
             b.addEventListener('click', () => follow(c, parseInt(b.dataset.leg, 10)));
         });
         el.querySelectorAll('.route-action').forEach(b => {
@@ -655,7 +735,40 @@
             });
         }, 20000);
         renderRecent();
+        renderQuickTimes();
         updateMode();
+    }
+
+    function renderQuickTimes() {
+        const when = document.querySelector('.plan-when');
+        if (!when || $('quickTimes')) return;
+        const wrap = document.createElement('div');
+        wrap.id = 'quickTimes';
+        wrap.className = 'quick-times only-routes';
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', 'Schnell eine Zeit wählen');
+        const opts = [['now', 'Jetzt'], [15, '+15 Min'], [30, '+30 Min'], [60, '+1 Std'], ['tomorrow', 'Morgen 7:00']];
+        wrap.innerHTML = opts.map(([v, l]) => `<button type="button" class="quick-time" data-v="${v}">${l}</button>`).join('');
+        when.parentNode.insertBefore(wrap, when.nextSibling);
+        wrap.addEventListener('click', (e) => {
+            const b = e.target.closest('.quick-time');
+            if (!b) return;
+            const v = b.dataset.v;
+            const nowBtn = $('nowBtn');
+            if (v === 'now') {
+                if (nowBtn && !A.isNowMode()) nowBtn.click();
+            } else {
+                const d = new Date();
+                if (v === 'tomorrow') { d.setDate(d.getDate() + 1); d.setHours(7, 0, 0, 0); }
+                else d.setMinutes(d.getMinutes() + parseInt(v, 10));
+                const pad = (n) => String(n).padStart(2, '0');
+                const di = $('depDate'), ti = $('depTime');
+                if (di) { di.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; di.dispatchEvent(new Event('change')); }
+                if (ti) { ti.value = `${pad(d.getHours())}:${pad(d.getMinutes())}`; ti.dispatchEvent(new Event('change')); }
+            }
+            wrap.querySelectorAll('.quick-time').forEach(x => x.classList.toggle('on', x === b));
+            if (hasDestination()) search();
+        });
     }
 
     function onViewChange(view) {
