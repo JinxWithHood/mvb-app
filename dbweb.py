@@ -49,6 +49,18 @@ class DbWebError(Exception):
     pass
 
 
+class DbWebBlocked(DbWebError):
+    """bahn.de refuses this server (HTTP 403) – typical for cloud/datacenter IPs."""
+
+
+_blocked = {'until': 0.0}
+BLOCK_PAUSE = 15 * 60
+
+
+def is_blocked():
+    return time.time() < _blocked['until']
+
+
 def _cache_get(key):
     with _cache_lock:
         hit = _cache.get(key)
@@ -76,6 +88,8 @@ def _request(method, path, params=None, body=None, ttl=0, timeout=12):
     cached = _cache_get(key)
     if cached is not None:
         return cached
+    if is_blocked():
+        raise DbWebBlocked('bahn.de blockiert diesen Server')
     last = None
     for attempt in range(2):
         try:
@@ -88,6 +102,9 @@ def _request(method, path, params=None, body=None, ttl=0, timeout=12):
                 last = DbWebError(f'bahn.de antwortet mit {r.status_code}')
                 time.sleep(0.6 * (attempt + 1))
                 continue
+            if r.status_code == 403:
+                _blocked['until'] = time.time() + BLOCK_PAUSE
+                raise DbWebBlocked('bahn.de blockiert diesen Server (403)')
             if r.status_code >= 400:
                 raise DbWebError(f'bahn.de antwortet mit {r.status_code}')
             data = r.json()

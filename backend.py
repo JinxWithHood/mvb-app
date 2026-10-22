@@ -988,6 +988,8 @@ def search_station():
                 return []
 
         def query_db():
+            if dbweb.is_blocked():
+                return []
             try:
                 out = []
                 for loc in dbweb.locations(query, limit=10):
@@ -4555,7 +4557,16 @@ def _db_departures_response(station_id):
     try:
         entries = dbweb.departures_raw(lid, when, duration)
     except Exception as ex:
-        print(f"[WARN] bahn.de departures: {ex}")
+        if not isinstance(ex, dbweb.DbWebBlocked):
+            print(f"[WARN] bahn.de departures: {ex}")
+        # fall back to the NASA board for the same stop (found by name)
+        nasa_id = _nasa_id_for(None, name)
+        if nasa_id:
+            from flask import redirect as _redirect
+            from urllib.parse import urlencode as _urlencode
+            args = {k: v for k, v in request.args.items() if k != 'station_id'}
+            args['station_id'] = nasa_id
+            return _redirect('/api/departures?' + _urlencode(args), code=307)
         return jsonify({"error": "Abfahrten gerade nicht erreichbar"}), 502
     items = [_db_departure_item(e, name, i) for i, e in enumerate(entries)]
     items.sort(key=lambda d: (d['day_offset'], d['time']))
@@ -4740,6 +4751,7 @@ def api_routes():
     d_ticket, bike = a.get('dticket') == '1', a.get('bike') == '1'
     page = a.get('page') or ''
     errors = []
+    db_blocked = False
 
     # ---- 1) bahn.de (bundesweit, Echtzeit, Preise) ----
     if not page.startswith('nasa:'):
@@ -4768,6 +4780,9 @@ def api_routes():
                     'from': {'name': f_name}, 'to': {'name': t_name},
                 })
             errors.append('bahn.de: keine Verbindung')
+        except dbweb.DbWebBlocked as ex:
+            db_blocked = True
+            errors.append(str(ex))
         except Exception as ex:
             print(f"[WARN] routes via bahn.de: {ex}")
             errors.append(str(ex))
@@ -4782,9 +4797,15 @@ def api_routes():
         if page.startswith('nasa:'):
             _, direction, iso = page.split(':', 2)
             search = datetime.datetime.strptime(iso, '%Y-%m-%dT%H%M')
+        elif arrive:
+            # NASA only searches by departure: start earlier and keep the ones that arrive in time
+            search = when - datetime.timedelta(minutes=90)
         fut = _v2_pool.submit(_nasa_connections, o_id, d_id, local_tz.localize(search), modes,
                               max_changes, min_change)
         conns = fut.result(timeout=18)
+        if arrive and not page:
+            ok = [c for c in conns if c.get('arr') and _parse_iso(c['arr']['iso']) and _parse_iso(c['arr']['iso']) <= when]
+            conns = ok[-5:] if ok else conns[:3]
         if page.startswith('nasa:') and page.split(':')[1] == 'earlier' and conns:
             # keep only those that leave before the previous first result
             limit_dt = search + datetime.timedelta(minutes=60)
@@ -4796,7 +4817,7 @@ def api_routes():
             'earlier': f"nasa:earlier:{(first - datetime.timedelta(minutes=60)).strftime('%Y-%m-%dT%H%M')}" if first else None,
             'later': f"nasa:later:{(last + datetime.timedelta(minutes=1)).strftime('%Y-%m-%dT%H%M')}" if last else None,
             'from': {'name': from_name}, 'to': {'name': to_name},
-            'notice': 'Bundesweite Suche gerade nicht erreichbar – Ergebnisse aus dem NASA-Netz (Mitteldeutschland).',
+            'notice': None if db_blocked or page else 'Bundesweite Suche gerade nicht erreichbar – Ergebnisse aus dem NASA-Netz.',
         })
     except _V2Timeout:
         errors.append('NASA: Zeitüberschreitung')
