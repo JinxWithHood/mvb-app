@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10.2">
+  <link rel="stylesheet" href="styles.css?v=10.3">
 </head>
 <body>
   <!-- SVG Icon Sprite -->
@@ -54,6 +54,7 @@
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12L13 2z"/></symbol>
     <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m10 21 2-6 3 3v3M8 12l3-4 4 2 3 2M11 8l-1 5"/></symbol>
   </svg>
 
@@ -405,6 +406,7 @@
                       <button class="map-toggle" data-group="bus" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-bus"/></svg><span class="map-toggle-label">Busse</span> <span class="map-cnt" id="mapCntBus">0</span></button>
                       <button class="map-toggle" data-group="train" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-train"/></svg><span class="map-toggle-label">Züge</span> <span class="map-cnt" id="mapCntTrain">0</span></button>
                       <button class="map-toggle map-delay-toggle" id="mapDelayBtn" aria-pressed="false" title="Pünktlichkeit farbig anzeigen"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg><span class="map-toggle-label">Pünktlichkeit</span></button>
+                      <button class="map-toggle map-quality-toggle" id="mapQualityBtn" aria-pressed="false" title="Sparmodus"><svg class="ico" aria-hidden="true"><use href="#i-bolt"/></svg><span class="map-toggle-label">Sparmodus</span></button>
                       <button class="map-icon-btn" id="mapLocateBtn" title="Mein Standort" aria-label="Mein Standort"><svg class="ico" aria-hidden="true"><use href="#i-locate"/></svg></button>
                       <button class="map-icon-btn" id="mapHomeBtn" title="Ganz Magdeburg" aria-label="Ganz Magdeburg zeigen"><svg class="ico" aria-hidden="true"><use href="#i-home"/></svg></button>
                       <button class="map-icon-btn" id="mapFullscreenBtn" title="Vollbild" aria-label="Vollbild umschalten"><svg class="ico" aria-hidden="true"><use href="#i-expand"/></svg></button>
@@ -1029,12 +1031,13 @@
   <script src="maintenance.js?v=1.0"></script>
   <script src="pwa.js?v=8.0"></script>
   <script src="jinx-fx.js?v=8.0"></script>
-  <script src="live-map.js?v=9.3"></script>
+  <script src="live-map.js?v=9.4"></script>
   <script src="season.js?v=1.0"></script>
   <script src="push.js?v=8.0"></script>
   <script src="settings.js?v=1.1"></script>
   <script src="app.js?v=9.4"></script>
   <script src="routes.js?v=1.3"></script>
+  <script src="secret.js?v=1.0"></script>
   <script>
     // Failsafe: if the app script never took over the loading screen (e.g. a crash), remove it after 8 s.
     // Otherwise the app itself decides – it only leaves the screen once the server answers (or shows an error).

@@ -52,6 +52,18 @@
     try { delayMode = localStorage.getItem('map_delay_mode') === '1'; } catch (e) { /* ignore */ }
     let legendSig = '';
 
+    // Low-quality mode: automatically on phones & tablets (fewer frames, no glow, canvas lines)
+    function isTouchDevice() {
+        const ua = navigator.userAgent || '';
+        const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+        return iPadOS || /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua) ||
+            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches);
+    }
+    let qualityPref = 'auto';      // auto | low | high
+    try { qualityPref = localStorage.getItem('map_quality') || 'auto'; } catch (e) { /* ignore */ }
+    const autoLow = isTouchDevice() || (navigator.deviceMemory && navigator.deviceMemory <= 2);
+    let lowQ = qualityPref === 'low' || (qualityPref === 'auto' && autoLow);
+
     // ---------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------
@@ -212,6 +224,9 @@
     // ---------------------------------------------------------
     function createMap() {
         map = L.map('liveMap', {
+            preferCanvas: lowQ,            // one canvas instead of hundreds of SVG paths
+            fadeAnimation: !lowQ,
+            markerZoomAnimation: !lowQ,
             center: CENTER,
             zoom: 13,
             minZoom: 11,
@@ -222,6 +237,8 @@
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.attributionControl.setPrefix(false);
         tileLayer = L.tileLayer(tileUrl('base'), {
+            keepBuffer: lowQ ? 1 : 2,
+            updateWhenZooming: !lowQ,
             maxZoom: 19,
             maxNativeZoom: 16,
             attribution: 'Karte © Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende · Gleise © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Linienwege & Live-Daten: INSA/HAFAS',
@@ -717,6 +734,32 @@
         return true;
     }
 
+    function setLowQuality(on, byUser) {
+        const wasCanvas = map && map.options.preferCanvas;
+        lowQ = !!on;
+        if (byUser) {
+            // back to "auto" when the choice matches what the device would get anyway
+            qualityPref = lowQ === !!autoLow ? 'auto' : (lowQ ? 'low' : 'high');
+            try { localStorage.setItem('map_quality', qualityPref); } catch (e) { /* ignore */ }
+        }
+        const shell = document.querySelector('.map-shell');
+        if (shell) shell.classList.toggle('map-lq', lowQ);
+        const btn = $('mapQualityBtn');
+        if (btn) {
+            btn.classList.toggle('active', lowQ);
+            btn.setAttribute('aria-pressed', lowQ ? 'true' : 'false');
+            btn.title = lowQ ? 'Sparmodus an – flüssiger auf Handy & Tablet' : 'Sparmodus aus – volle Effekte';
+        }
+        if (map) {
+            map.options.fadeAnimation = !lowQ;
+            map.options.markerZoomAnimation = !lowQ;
+        }
+        if (byUser && window.MVBApp && window.MVBApp.showToast) {
+            const hint = map && wasCanvas !== lowQ ? ' Linien werden beim nächsten Öffnen umgestellt.' : '';
+            window.MVBApp.showToast(lowQ ? `Sparmodus an: weniger Effekte, flüssigere Karte.${hint}` : `Volle Qualität an.${hint}`, 'info');
+        }
+    }
+
     function setDelayMode(on) {
         delayMode = !!on;
         try { localStorage.setItem('map_delay_mode', delayMode ? '1' : '0'); } catch (e) { /* ignore */ }
@@ -881,11 +924,14 @@
         rafId = requestAnimationFrame(animate);
         if (!visible || !map || document.hidden) return;
         const dtFrame = ts - lastFrame;
-        if (dtFrame < 33) return; // ~30 fps is plenty
+        if (dtFrame < (lowQ ? 100 : 33)) return; // ~30 fps is plenty, 10 fps in low-quality mode
         lastFrame = ts;
         const now = performance.now();
+        // low quality: only move what is on screen (plus a margin)
+        const view = lowQ ? map.getBounds().pad(0.25) : null;
         vehicles.forEach(st => {
             if (!map.hasLayer(st.marker)) return;
+            if (view && st.pos && !view.contains(st.pos)) { st.offscreen = true; return; }
             const elapsed = now - st.t0;
             let p = trackPos(st.track, elapsed);
             if (!p) return;
@@ -924,7 +970,7 @@
                 st.body.classList.toggle('stopped', st.angle == null);
             }
         });
-        if (focus && ts - lastFocusTick > 500) {
+        if (focus && ts - lastFocusTick > (lowQ ? 1500 : 500)) {
             lastFocusTick = ts;
             updateFocusGeometry(false);
         }
@@ -1560,6 +1606,9 @@
         });
         const dBtn = $('mapDelayBtn');
         if (dBtn) dBtn.addEventListener('click', () => setDelayMode(!delayMode));
+        const qBtn = $('mapQualityBtn');
+        if (qBtn) qBtn.addEventListener('click', () => setLowQuality(!lowQ, true));
+        setLowQuality(lowQ, false);
         setDelayMode(delayMode);
         const legend = $('mapLegend');
         if (legend) enableLegendDrag(legend);
@@ -1653,7 +1702,9 @@
     // ---------------------------------------------------------
     LiveMap.init = function (o) {
         opts = o || {};
+        setLowQuality(lowQ, false);
     };
+    LiveMap.isLowQuality = () => lowQ;
 
     LiveMap.show = async function () {
         visible = true;
