@@ -14,13 +14,17 @@ jobs:
           d = json.loads(urllib.request.urlopen('https://mvb-app.onrender.com/api/formation/diag', timeout=90).read())
           res = {}
           full = None
-          for t in d.get('trains', [])[:8]:
-              if not t.get('trainNum'): continue
+          variants = [('https://app.vendo.noncd.db.de', True), ('https://app.services-bahn.de', True), ('https://app.vendo.noncd.db.de', False)]
+          trains = [t for t in d.get('trains', []) if t.get('trainNum')][:3]
+          for (host, full_h) in variants:
+           for t in trains:
               path = f"/mob/zuglaeufe/{t['trainCat']}_{t['trainNum']}/halte/by-abfahrt/8010224_2026-10-28T{t['time']}:00+01:00/wagenreihung"
               ct = 'application/x.db.vendo.mob.wagenreihung.v3+json'
-              r = urllib.request.Request('https://app.services-bahn.de' + urllib.parse.quote(path, safe='/:_+-'), headers={
-                  'Accept': ct, 'Content-Type': ct, 'X-Correlation-ID': f'{uuid.uuid4()}_{uuid.uuid4()}',
-                  'Accept-Language': 'de', 'User-Agent': 'okhttp/4.12.0', 'Accept-Encoding': 'gzip'})
+              hd = {'Accept': ct, 'Content-Type': ct, 'X-Correlation-ID': f'{uuid.uuid4()}_{uuid.uuid4()}',
+                  'Accept-Language': 'en,de', 'User-Agent': 'okhttp/4.12.0', 'Accept-Encoding': 'gzip'}
+              if full_h:
+                  hd.update({'X-Device-Os-Name': 'Android', 'X-Device-Os-Version': '34', 'X-Device-Model': 'Google Pixel 7', 'X-App-Version': '25.40.1'})
+              r = urllib.request.Request(host + urllib.parse.quote(path, safe='/:_+-'), headers=hd)
               try:
                   with urllib.request.urlopen(r, timeout=20) as x:
                       b = x.read()
@@ -30,14 +34,14 @@ jobs:
                   st, txt = e.code, e.read()[:200].decode('utf-8', 'replace')
               except Exception as e:
                   st, txt = 'ERR', str(e)[:100]
-              res[t['line'] + ' ' + t['time']] = [st, len(txt), txt[:120] if st != 200 else '']
+              res[host[8:20] + str(full_h) + ' ' + t['line'] + ' ' + t['time']] = [st, len(txt), txt[:90] if st != 200 else '']
               if st == 200 and full is None:
                   full = txt
-          print('RES ' + json.dumps(res)[:1500])
+          print('RES ' + json.dumps(res)[:3600])
           if full:
               print('FULL ' + full[:60000])
           PY
           python3 p.py > out.txt 2>&1
-          echo "::notice title=res::$(grep '^RES' out.txt | head -c 1600)"
+          echo "::notice title=res::$(grep '^RES' out.txt | head -c 3700)"
           f=$(grep '^FULL' out.txt | cut -c6-)
           for i in 0 1 2 3 4 5 6 7 8 9 10 11; do part="${f:$((i*3800)):3800}"; [ -z "$part" ] && break; echo "::notice title=full$i::$part"; done
