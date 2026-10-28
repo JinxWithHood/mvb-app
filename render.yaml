@@ -17,6 +17,9 @@ services:
       - key: VAPID_PRIVATE_KEY
         sync: false
       # Dauerhafter Speicher (kostenlos bei upstash.com): Push-Abos, Wecker und Schlüssel überstehen Neustarts
+      # Wagenreihung über den Helfer daheim (relay/wagenreihung_helfer.py) – selbst ausgedachter Schlüssel
+      - key: FORMATION_AGENT_KEY
+        sync: false
       - key: UPSTASH_REDIS_REST_URL
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN

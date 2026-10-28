@@ -120,18 +120,35 @@ def all_blocked():
     return all(_blocked.get(name, 0) > now for name, _, _ in sources())
 
 
+def cache_key(eva, cat, num, dep_local):
+    return f"{eva}|{cat}|{num}|{dep_local.strftime('%Y-%m-%dT%H:%M')}"
+
+
+def params_for(eva, cat, num, dep_local):
+    utc = dep_local.replace(tzinfo=TZ).astimezone(datetime.timezone.utc) if hasattr(TZ, 'key') \
+        else TZ.localize(dep_local).astimezone(datetime.timezone.utc)
+    return {
+        'administrationId': 80, 'category': cat, 'date': utc.strftime('%Y-%m-%d'),
+        'evaNumber': eva, 'number': num, 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+    }
+
+
+def store(params, data, ok):
+    """Result delivered by the home helper."""
+    _cache_put(('helper', params['evaNumber'], params['category'], params['number'], params['time']),
+               data if ok else {}, OK_TTL if ok else MISS_TTL)
+
+
 def fetch(eva, cat, num, dep_local):
     """Raw bahn.de answer or None (no formation). Raises Blocked when every host refuses us."""
     key = (eva, cat, num, dep_local.strftime('%Y-%m-%dT%H:%M'))
     hit = _cache_get(key)
     if hit is not None:
         return hit or None
-    utc = dep_local.replace(tzinfo=TZ).astimezone(datetime.timezone.utc) if hasattr(TZ, 'key') \
-        else TZ.localize(dep_local).astimezone(datetime.timezone.utc)
-    params = {
-        'administrationId': 80, 'category': cat, 'date': utc.strftime('%Y-%m-%d'),
-        'evaNumber': eva, 'number': num, 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
-    }
+    params = params_for(eva, cat, num, dep_local)
+    hit = _cache_get(('helper', eva, cat, num, params['time']))
+    if hit is not None:
+        return hit or None
     tried = False
     for name, url, headers in sources():
         if _blocked.get(name, 0) > time.time():

@@ -138,8 +138,12 @@
         while (running < MAX_PARALLEL && queue.length) {
             const job = queue.shift();
             running++;
-            const viaServer = serverBlocked ? Promise.resolve({ blocked: true }) :
-                fetch(`${apiBase()}/formation?${job.qs}`).then((r) => r.json().catch(() => ({}))).catch(() => ({}));
+            const ask = () => fetch(`${apiBase()}/formation?${job.qs}`).then((r) => r.json().catch(() => ({}))).catch(() => ({}));
+            // the home helper fetches it: ask again a few times while it is "pending"
+            const askPatiently = (tries) => ask().then((d) => (d && d.pending && tries > 0
+                ? new Promise((res) => setTimeout(res, 3500)).then(() => askPatiently(tries - 1))
+                : d));
+            const viaServer = serverBlocked ? Promise.resolve({ blocked: true }) : askPatiently(5);
             viaServer
                 .then((data) => {
                     if (data && data.blocked) {
@@ -150,8 +154,9 @@
                 })
                 .then((data) => {
                     const ok = data && data.available && Array.isArray(data.cars) && data.cars.length ? data : null;
-                    if (directBroken && serverBlocked) disabledUntil = Date.now() + 30 * 60 * 1000;
-                    cache.set(job.key, { at: Date.now(), data: ok });
+                    if (directBroken && serverBlocked) disabledUntil = Date.now() + 10 * 60 * 1000;
+                    if (data && data.pending) cache.delete(job.key);          // helper slow: try again next time
+                    else cache.set(job.key, { at: Date.now(), data: ok });
                     job.resolve(ok);
                 })
                 .finally(() => { running--; pump(); });

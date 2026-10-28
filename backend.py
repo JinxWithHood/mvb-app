@@ -4463,6 +4463,75 @@ def api_formation_diag():
     return jsonify(out)
 
 
+# ---- Wagenreihungs-Helfer (läuft bei dir zu Hause, holt die Daten über deinen Anschluss) ----
+# bahn.de sperrt Rechenzentren. Ein kleines Programm auf einem Rechner mit normalem Internet
+# (relay/wagenreihung_helfer.py) fragt hier nach offenen Aufträgen, holt die Wagenreihung bei
+# bahn.de und schickt sie zurück. Kein offener Port nötig. Schlüssel: FORMATION_AGENT_KEY.
+_AGENT_KEY = (os.environ.get('FORMATION_AGENT_KEY') or '').strip()
+_agent = {'seen': 0.0}
+_fm_jobs = {}            # key -> {'params':…, 'at': ts, 'taken': ts}
+_fm_jobs_lock = threading.Lock()
+
+
+def _agent_ok():
+    import hmac
+    key = request.headers.get('X-Agent-Key', '')
+    return bool(_AGENT_KEY) and hmac.compare_digest(key, _AGENT_KEY)
+
+
+def _agent_online():
+    return bool(_AGENT_KEY) and time.time() - _agent['seen'] < 45
+
+
+def _fm_enqueue(job_key, params):
+    with _fm_jobs_lock:
+        now = time.time()
+        for k in [k for k, j in _fm_jobs.items() if now - j['at'] > 120]:
+            _fm_jobs.pop(k, None)
+        if job_key not in _fm_jobs and len(_fm_jobs) < 60:
+            _fm_jobs[job_key] = {'params': params, 'at': now, 'taken': 0}
+
+
+@app.route('/api/formation/agent/jobs')
+def api_formation_agent_jobs():
+    if not _agent_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    _agent['seen'] = time.time()
+    out = []
+    with _fm_jobs_lock:
+        now = time.time()
+        for k, j in list(_fm_jobs.items()):
+            if now - j['at'] > 120:
+                _fm_jobs.pop(k, None)
+                continue
+            if now - j['taken'] > 20:          # hand out again if the helper didn't answer
+                j['taken'] = now
+                out.append({'key': k, 'params': j['params']})
+            if len(out) >= 6:
+                break
+    return jsonify({'jobs': out, 'path': formation.PATH})
+
+
+@app.route('/api/formation/agent/result', methods=['POST'])
+def api_formation_agent_result():
+    if not _agent_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    _agent['seen'] = time.time()
+    body = request.get_json(silent=True) or {}
+    k = str(body.get('key') or '')
+    with _fm_jobs_lock:
+        job = _fm_jobs.pop(k, None)
+    if not job:
+        return jsonify({'ok': False, 'reason': 'unknown job'})
+    status = body.get('status')
+    data = body.get('data')
+    if isinstance(data, dict) and data.get('groups') and status == 200:
+        formation.store(job['params'], data, True)
+    elif status in (204, 404) or (status == 200 and not (isinstance(data, dict) and data.get('groups'))):
+        formation.store(job['params'], None, False)
+    return jsonify({'ok': True})
+
+
 @app.route('/api/formation')
 def api_formation():
     """Wagenreihung for one train departure: eva, cat, num, date (YYYY-MM-DD), time (HH:MM, planned)."""
@@ -4479,6 +4548,10 @@ def api_formation():
     try:
         raw = formation.fetch(eva, cat, num, when)
     except formation.Blocked:
+        if _agent_online():
+            params = formation.params_for(eva, cat, num, when)
+            _fm_enqueue(formation.cache_key(eva, cat, num, when), params)
+            return jsonify({'available': False, 'pending': True})
         return jsonify({'available': False, 'blocked': True})
     except Exception as ex:
         print(f"[WARN] formation: {ex}")
