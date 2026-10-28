@@ -1,0 +1,19 @@
+name: diag-formation
+on:
+  push:
+    branches: [diag-formation]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render diag
+        shell: bash {0}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            d=$(curl -s -m 90 https://mvb-app.onrender.com/api/formation/diag)
+            echo "$d" | grep -q '"hosts"' && break; sleep 20
+          done
+          echo "::notice title=probe::$(echo "$d" | head -c 1200)"
+          T=$(echo "$d" | python3 -c "import sys,json; d=json.load(sys.stdin); t=[x for x in d.get('trains',[]) if x.get('trainCat') in ('ICE','IC','EC')] or d.get('trains') or [{}]; t=t[0]; print('eva=8010224&cat=%s&num=%s&date=2026-10-28&time=%s' % (t.get('trainCat'), t.get('trainNum'), t.get('time')))")
+          f=$(curl -s -m 60 "https://mvb-app.onrender.com/api/formation?$T" | head -c 700)
+          echo "::notice title=formation::$T => $f"
