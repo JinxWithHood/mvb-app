@@ -6,36 +6,16 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe sources from a neutral runner
+      - name: Probe alternative formation sources
         run: |
-          cat > p.py <<'PY'
-          import json, urllib.request, urllib.parse, datetime
-          UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          def get(url, h=None):
-              req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'de-DE,de;q=0.9', **(h or {})})
-              try:
-                  with urllib.request.urlopen(req, timeout=20) as r:
-                      b = r.read(); return r.status, b[:400].decode('utf-8', 'replace'), len(b)
-              except urllib.error.HTTPError as e:
-                  return e.code, e.read()[:200].decode('utf-8', 'replace'), 0
-              except Exception as e:
-                  return 'ERR', str(e)[:120], 0
-          d = json.loads(urllib.request.urlopen('https://mvb-app.onrender.com/api/formation/diag', timeout=60).read())
-          out = {'trains': [t['line'] + ' ' + t['time'] for t in d.get('trains', [])]}
-          for t in d.get('trains', [])[:4]:
-              if not t.get('trainNum'): continue
-              now = datetime.datetime.utcnow()
-              h, m = map(int, t['time'].split(':'))
-              local = datetime.datetime(now.year, now.month, now.day, h, m)
-              utc = local - datetime.timedelta(hours=1)
-              q = urllib.parse.urlencode({'administrationId': 80, 'category': t['trainCat'], 'date': utc.strftime('%Y-%m-%d'), 'evaNumber': '8010224', 'number': t['trainNum'], 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')})
-              key = t['trainCat'] + t['trainNum']
-              for host in ['https://www.bahn.de', 'https://int.bahn.de']:
-                  st, body, n = get(f'{host}/web/api/reisebegleitung/wagenreihung/vehicle-sequence?{q}')
-                  out[f'{key} {host[8:]}'] = [st, n, body[:160]]
-          st, body, n = get('https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=Magdeburg&typ=ALL&limit=1')
-          out['bahn.de orte'] = [st, n, body[:80]]
-          print(json.dumps(out)[:3800])
-          PY
-          res=$(python3 p.py 2>&1 | tr -d '\n' | head -c 3800)
-          echo "::notice title=probe::$res"
+          T=$(TZ=Europe/Berlin date -d '+40 min' +%Y%m%d%H%M)
+          r=""
+          for u in \
+            "https://ist-wr.noncd.db.de/wagenreihung/1.0/555/$T" \
+            "https://www.apps-bahn.de/wr/wagenreihung/1.0/555/$T" \
+            "https://ist-wr.noncd.db.de/wagenreihung/1.0/1006/$T" ; do
+            c=$(curl -s -o /tmp/b -w '%{http_code}' -m 20 -A 'Mozilla/5.0' "$u"); r="$r | $u => $c $(head -c 150 /tmp/b | tr -d '\n"')"
+          done
+          h=$(curl -s -D - -o /dev/null -m 20 -H 'Origin: https://mvb-app.onrender.com' -A 'Mozilla/5.0' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE&date=2026-10-28&evaNumber=8010224&number=555&time=2026-10-28T11:56:00.000Z' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';')
+          o=$(curl -s -D - -o /dev/null -m 20 -X OPTIONS -H 'Origin: https://mvb-app.onrender.com' -H 'Access-Control-Request-Method: GET' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';')
+          echo "::notice title=probe::$r || CORS GET: $h || CORS OPTIONS: $o"
