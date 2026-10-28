@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Probe alternative formation sources
+        shell: bash {0}
         run: |
           T=$(TZ=Europe/Berlin date -d '+40 min' +%Y%m%d%H%M)
           r=""
@@ -14,8 +15,8 @@ jobs:
             "https://ist-wr.noncd.db.de/wagenreihung/1.0/555/$T" \
             "https://www.apps-bahn.de/wr/wagenreihung/1.0/555/$T" \
             "https://ist-wr.noncd.db.de/wagenreihung/1.0/1006/$T" ; do
-            c=$(curl -s -o /tmp/b -w '%{http_code}' -m 20 -A 'Mozilla/5.0' "$u"); r="$r | $u => $c $(head -c 150 /tmp/b | tr -d '\n"')"
+            c=$(curl -s -o /tmp/b -w '%{http_code}' -m 20 -A 'Mozilla/5.0' "$u" || true); r="$r | $u => $c $(head -c 150 /tmp/b | tr -d '\n"')"
           done
-          h=$(curl -s -D - -o /dev/null -m 20 -H 'Origin: https://mvb-app.onrender.com' -A 'Mozilla/5.0' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE&date=2026-10-28&evaNumber=8010224&number=555&time=2026-10-28T11:56:00.000Z' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';')
-          o=$(curl -s -D - -o /dev/null -m 20 -X OPTIONS -H 'Origin: https://mvb-app.onrender.com' -H 'Access-Control-Request-Method: GET' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';')
+          h=$(curl -s -D - -o /dev/null -m 20 -H 'Origin: https://mvb-app.onrender.com' -A 'Mozilla/5.0' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE&date=2026-10-28&evaNumber=8010224&number=555&time=2026-10-28T11:56:00.000Z' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';' || true)
+          o=$(curl -s -D - -o /dev/null -m 20 -X OPTIONS -H 'Origin: https://mvb-app.onrender.com' -H 'Access-Control-Request-Method: GET' 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence' | tr -d '\r' | grep -i 'access-control\|^HTTP' | tr '\n' ';' || true)
           echo "::notice title=probe::$r || CORS GET: $h || CORS OPTIONS: $o"
