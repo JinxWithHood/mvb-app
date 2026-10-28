@@ -9117,3 +9117,60 @@ body.settings-open { overflow: hidden; }
   .sx-tint { animation: none; transition-duration: 1s; }
   .sx-card { transition: none; transform: none; }
 }
+
+/* ============================================================
+   37. Wagenreihung in den Abfahrten (nur Züge & S-Bahn)
+   ============================================================ */
+.fm-slot { grid-column: 1 / -1; min-width: 0; margin-top: -4px; }
+.fm-slot:not(.ready) { display: none; }
+.fm { display: flex; flex-direction: column; gap: 8px; animation: fmIn 0.35s var(--ease-out, ease) both; }
+@keyframes fmIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.fm-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 8px 8px 6px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border: 1px solid var(--card-border);
+}
+.fm-scroll::-webkit-scrollbar { display: none; }
+.fm-scroll.overflow { -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent); }
+.fm-train { display: flex; align-items: flex-start; gap: 3px; width: max-content; }
+.fm-lead { height: 30px; display: grid; place-items: center; color: var(--primary); padding: 0 2px; }
+.fm-coupler { width: 7px; height: 2px; margin-top: 19px; background: var(--text-muted); opacity: 0.7; border-radius: 1px; }
+.fm-car { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; color: var(--text-muted); }
+.fm-car svg { display: block; overflow: visible; }
+.fm-car strong { font-size: 11px; line-height: 1; color: var(--text-primary); min-height: 11px; }
+.fm-car .fm-cls { font-size: 9px; font-weight: 700; line-height: 1; color: var(--text-muted); min-height: 9px; white-space: nowrap; }
+.fm-car .fm-sec { min-width: 14px; padding: 1px 3px; border-radius: 4px; box-sizing: border-box; text-align: center; font-size: 9px; font-weight: 800; line-height: 1.25; color: var(--text-secondary, var(--text-primary)); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.fm-car .fm-sec.empty { background: transparent; }
+.fm-car.c1 { color: #b7860b; }
+.fm-car.c1 .fm-cls { color: #a77908; }
+.fm-car.cb { color: #d9534f; }
+.fm-car.cb .fm-cls { color: #c9443f; }
+.fm-car.loco { color: color-mix(in srgb, var(--text-muted) 75%, transparent); }
+.fm-car.closed { opacity: 0.55; }
+.fm-car.pa svg { filter: drop-shadow(0 2px 0 #38bdf8); }
+.fm-car.pb svg { filter: drop-shadow(0 2px 0 #c084fc); }
+.theme-dark .fm-car.c1, .theme-dark .fm-car.c1 .fm-cls { color: #f2c94c; }
+.theme-dark .fm-car.cb, .theme-dark .fm-car.cb .fm-cls { color: #ff9a8f; }
+.fm-split { display: flex; gap: 8px; }
+.fm-part { flex: 1; min-width: 0; padding: 6px 9px; border-radius: 10px; display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.fm-part small { font-size: 10px; font-weight: 800; opacity: 0.85; }
+.fm-part strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-part.pa { background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); }
+.fm-part.pb { background: rgba(192, 132, 252, 0.12); border: 1px solid rgba(192, 132, 252, 0.35); }
+.fm-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.fm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; color: var(--text-secondary, var(--text-primary)); background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.fm-chip.fm-dir { color: var(--primary); background: rgba(var(--primary-rgb), 0.12); }
+.fm-chip.fm-first i { width: 10px; height: 3px; border-radius: 2px; background: #e0b020; }
+.fm-chip.fm-occ b { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
+.fm-chip.fm-occ b i { width: 3px; border-radius: 1px; background: color-mix(in srgb, var(--text-primary) 18%, transparent); }
+.fm-chip.fm-occ b i:nth-child(1) { height: 4px; }
+.fm-chip.fm-occ b i:nth-child(2) { height: 6px; }
+.fm-chip.fm-occ b i:nth-child(3) { height: 9px; }
+.fm-chip.o1 b i:nth-child(1) { background: #16a34a; }
+.fm-chip.o2 b i:nth-child(-n+2) { background: #d4a017; }
+.fm-chip.o3 b i, .fm-chip.o4 b i { background: #e5484d; }
+@media (prefers-reduced-motion: reduce) { .fm { animation: none; } }

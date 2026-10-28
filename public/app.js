@@ -1572,6 +1572,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             departuresList.appendChild(card);
+            if (window.MVBFormation) {
+                try { window.MVBFormation.attach(card, dep, currentStation); } catch (e) { /* optional extra */ }
+            }
         });
 
         if (isNowModeActive) {

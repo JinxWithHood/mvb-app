@@ -132,9 +132,33 @@ def patched_parse_station_board_request(self, data, departure_arrival_prefix: st
                 leg.messages = leg_msgs
                 leg.him_messages = leg_hims
                 leg.raw_jny = raw_leg
+                try:
+                    _attach_train_meta(leg, raw_leg, common)
+                except Exception:
+                    pass
     return legs
 
 BaseStationBoardRequest.parse_station_board_request = patched_parse_station_board_request
+
+
+def _attach_train_meta(leg, raw_leg, common):
+    """Train category/number (for the Wagenreihung) and expected occupancy per class."""
+    prodL = common.get('prodL') or []
+    px = raw_leg.get('prodX')
+    prod = prodL[px] if isinstance(px, int) and px < len(prodL) else {}
+    ctx = prod.get('prodCtx') or {}
+    leg.train_cat = (ctx.get('catOut') or ctx.get('catOutS') or '').strip() or None
+    leg.train_num = str(ctx.get('num') or '').strip() or None
+    occ = {}
+    tcocL = common.get('tcocL') or []
+    stop = raw_leg.get('stbStop') or {}
+    for i in ((stop.get('dTrnCmpSX') or {}).get('tcocX') or []):
+        if isinstance(i, int) and i < len(tcocL):
+            t = tcocL[i] or {}
+            k = {'FIRST': '1', 'SECOND': '2'}.get(t.get('c'))
+            if k and t.get('r'):
+                occ[k] = int(t['r'])
+    leg.occupancy = occ or None
 
 
 def get_profile_products(client, allowed_modes):
@@ -1362,7 +1386,9 @@ def get_departures():
                     "realtimeStatus": rt_status,
                     "estimatedTime": estimated,
                     "platform": platform,
-                    "operator": dep_op or ("HSB" if line_type == "hsb" else None)
+                    "operator": dep_op or ("HSB" if line_type == "hsb" else None),
+                    **_train_fields(line_type, line_name, getattr(dep, 'train_cat', None),
+                                    getattr(dep, 'train_num', None), getattr(dep, 'occupancy', None)),
                 })
 
             return jsonify(result)
@@ -4309,6 +4335,90 @@ def push_tick_route():
 # ===========================================================================
 import dbweb
 import transitous
+import formation
+
+
+# ---- Wagenreihung -----------------------------------------------------------
+_TRAIN_TYPES = ('regional', 'express', 'sbahn')
+
+
+def _train_fields(line_type, line_name, cat=None, num=None, occ=None):
+    """Extra fields for trains only: category + number (Wagenreihung) and expected occupancy."""
+    try:
+        return _train_fields_inner(line_type, line_name, cat, num, occ)
+    except Exception:
+        return {}
+
+
+def _train_fields_inner(line_type, line_name, cat, num, occ):
+    if line_type not in _TRAIN_TYPES:
+        return {}
+    if not cat or not num:
+        c2, n2 = formation.ident_from_text(line_name)
+        cat, num = cat or c2, num or n2
+    cat = (cat or '').strip().upper() or None
+    num = str(num or '').strip()
+    out = {}
+    if cat and num.isdigit():
+        out['trainCat'], out['trainNum'] = cat, num
+    if occ:
+        out['occupancy'] = occ
+    return out
+
+
+def _db_occupancy(e):
+    occ = {}
+    for a in e.get('auslastungsmeldungen') or []:
+        k = {'KLASSE_1': '1', 'KLASSE_2': '2'}.get(a.get('klasse'))
+        try:
+            if k and a.get('stufe'):
+                occ[k] = int(a['stufe'])
+        except (TypeError, ValueError):
+            pass
+    return occ or None
+
+
+def _tr_ident(s):
+    try:
+        return _tr_ident_inner(s)
+    except Exception:
+        return None, None
+
+
+def _tr_ident_inner(s):
+    cat, num = formation.ident_from_text(s.get('routeShortName'), s.get('displayName'), transitous.label(s))
+    tsn = str(s.get('tripShortName') or '').strip()
+    if not num and tsn.isdigit():
+        num = tsn
+    return cat, num
+
+
+@app.route('/api/formation')
+def api_formation():
+    """Wagenreihung for one train departure: eva, cat, num, date (YYYY-MM-DD), time (HH:MM, planned)."""
+    a = request.args
+    eva = (a.get('eva') or '').strip()
+    cat = (a.get('cat') or '').strip().upper()
+    num = (a.get('num') or '').strip()
+    if not re.fullmatch(r'\d{7}', eva) or cat not in formation.TRAIN_CATS or not re.fullmatch(r'\d{1,6}', num):
+        return jsonify({'available': False, 'reason': 'invalid'}), 400
+    try:
+        when = datetime.datetime.strptime(f"{a.get('date')} {a.get('time')}", '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        return jsonify({'available': False, 'reason': 'invalid'}), 400
+    try:
+        raw = formation.fetch(eva, cat, num, when)
+    except formation.Blocked:
+        return jsonify({'available': False, 'blocked': True})
+    except Exception as ex:
+        print(f"[WARN] formation: {ex}")
+        return jsonify({'available': False, 'reason': 'error'})
+    data = formation.normalize(raw) if raw else None
+    if not data:
+        return jsonify({'available': False})
+    resp = jsonify(data)
+    resp.headers['Cache-Control'] = 'public, max-age=60'
+    return resp
 from concurrent.futures import ThreadPoolExecutor as _V2Pool, TimeoutError as _V2Timeout
 
 _v2_pool = _V2Pool(max_workers=6)
@@ -4543,6 +4653,8 @@ def _db_departure_item(e, station_name, idx):
         'platform': re.sub(r'^Pos\.\s*', '', e.get('ezGleis') or e.get('gleis') or ''),
         'operator': st['operator'] if not st['mvb'] else 'MVB',
         'src': 'db', 'notes': [t for t in texts if t][:2],
+        **_train_fields(st['type'], st['line'], *formation.ident_from_text(
+            vm.get('langText'), vm.get('mittelText'), vm.get('name')), _db_occupancy(e)),
     }
 
 
@@ -5108,6 +5220,7 @@ def _tr_departure_item(s, station_name, idx):
         'estimatedTime': _hm(real) if (delay not in (None, 0)) else None,
         'platform': place.get('track') or place.get('scheduledTrack') or '',
         'operator': st['operator'], 'src': 'tr',
+        **_train_fields(st['type'], st['line'], *_tr_ident(s), None),
     }
 
 
