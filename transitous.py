@@ -9,12 +9,20 @@ import datetime
 import json
 import threading
 import time
-from zoneinfo import ZoneInfo
 
 import requests
 
 BASE = 'https://api.transitous.org/api/v1'
-TZ = ZoneInfo('Europe/Berlin')
+try:  # Windows has no built-in time zone data -> pip package tzdata, else pytz
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo('Europe/Berlin')
+except Exception:
+    import pytz
+    TZ = pytz.timezone('Europe/Berlin')
+
+
+def _localize(naive):
+    return TZ.localize(naive) if hasattr(TZ, 'localize') else naive.replace(tzinfo=TZ)
 
 # app modes -> MOTIS transit modes
 MODE_MAP = {
@@ -89,7 +97,7 @@ def parse(ts):
 
 
 def iso_utc(local_naive):
-    return local_naive.replace(tzinfo=TZ).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return _localize(local_naive).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def stop_id(app_id):

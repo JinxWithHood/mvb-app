@@ -18,7 +18,7 @@ import time
 
 import requests
 
-try:
+try:  # Windows has no built-in time zone data -> pip package tzdata, else pytz
     from zoneinfo import ZoneInfo
     TZ = ZoneInfo('Europe/Berlin')
 except Exception:  # pragma: no cover
