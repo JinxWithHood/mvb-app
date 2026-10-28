@@ -2,7 +2,7 @@
 // - network-first for the app shell (updates arrive immediately)
 // - cache-first for images/fonts, never caches live API data
 // - Web Push: shows notifications from the server, opens the right tab on tap
-const CACHE_NAME = 'mvb-magdeburg-cache-v9-12';
+const CACHE_NAME = 'mvb-magdeburg-cache-v9-13';
 const CORE_URLS = [
   '/',
   '/index.html',

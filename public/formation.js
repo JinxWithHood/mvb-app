@@ -181,7 +181,19 @@
     let observer = null;
     const pending = new WeakMap();
     function whenVisible(el, fn) {
-        if (!('IntersectionObserver' in window)) { fn(); return; }
+        // IntersectionObserver plus a slow fallback check (some webviews / background tabs never call IO)
+        let done = false;
+        const orig = fn;
+        const once = () => { if (done) return; done = true; orig(); };
+        const started = Date.now();
+        const poll = () => {
+            if (done || !el.isConnected || Date.now() - started > 5 * 60 * 1000) return;
+            const r = el.offsetParent !== null || getComputedStyle(el).position === 'fixed' ? el.getBoundingClientRect() : null;
+            if (r && r.bottom > -200 && r.top < (window.innerHeight || 800) + 200) { once(); return; }
+            setTimeout(poll, 1200);
+        };
+        setTimeout(poll, 1200);
+        if (!('IntersectionObserver' in window)) { once(); return; }
         if (!observer) {
             observer = new IntersectionObserver((entries) => {
                 entries.forEach((en) => {
@@ -193,7 +205,7 @@
                 });
             }, { rootMargin: '200px 0px' });
         }
-        pending.set(el, fn);
+        pending.set(el, once);
         observer.observe(el);
     }
 
