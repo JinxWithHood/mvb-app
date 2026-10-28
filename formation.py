@@ -10,7 +10,9 @@ liefert die App einfach keine Wagenreihung – sonst ändert sich nichts.
 """
 import datetime
 import os
+import random
 import re
+import uuid
 import threading
 import time
 
@@ -106,12 +108,32 @@ def _cache_put(key, val, ttl):
         _cache[key] = (time.time() + ttl, val)
 
 
+# the browser headers Travel::Status::DE::DBRIS (and other open-source DB clients) send
+_AGENTS = [
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.{a}.{b} Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; SM-S928B/DS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.{a}.{b} Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.{a}.{b} Mobile Safari/537.36',
+    'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.{a}.{b} Safari/537.36',
+]
+
+
+def browser_headers(host='https://www.bahn.de'):
+    return {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Origin': host,
+        'Referer': host + '/buchung/fahrplan/suche',
+        'User-Agent': random.choice(_AGENTS).format(a=random.randint(0, 999), b=random.randint(0, 99)),
+        'x-correlation-id': f'{uuid.uuid4()}_{uuid.uuid4()}',
+    }
+
+
 def sources():
     """[(name, url, headers)] in the order they are tried."""
     out = []
     if RELAY_URL.startswith('https://'):
         out.append(('relay', RELAY_URL, {'X-Relay-Key': RELAY_KEY}))
-    out += [(h, h + PATH, {}) for h in HOSTS]
+    out += [(h, h + PATH, browser_headers(h)) for h in HOSTS]
     return out
 
 
