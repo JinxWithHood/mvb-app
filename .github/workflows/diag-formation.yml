@@ -6,21 +6,12 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe bahn.de with DBRIS browser headers
+      - name: Render diag after deploy
         shell: bash {0}
         run: |
-          D=$(curl -s -m 90 https://mvb-app.onrender.com/api/formation/diag)
-          read NUM CAT T <<< $(echo "$D" | python3 -c "import sys,json; t=[x for x in json.load(sys.stdin).get('trains',[]) if x.get('trainCat') in ('ICE','IC','EC')] or [{}]; print(t[0].get('trainNum',''), t[0].get('trainCat',''), t[0].get('time',''))")
-          UTC=$(TZ=UTC date -d "TZ=\"Europe/Berlin\" 2026-10-28 $T" +%Y-%m-%dT%H:%M:%S.000Z)
-          UA="Mozilla/5.0 (Linux; Android 14; SM-S928B/DS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.$((RANDOM%1000)).$((RANDOM%100)) Mobile Safari/537.36"
-          CID="$(cat /proc/sys/kernel/random/uuid)_$(cat /proc/sys/kernel/random/uuid)"
-          H=(-H "Accept: application/json" -H "Content-Type: application/json; charset=utf-8" -H "Origin: https://www.bahn.de" -H "Referer: https://www.bahn.de/buchung/fahrplan/suche" -H "User-Agent: $UA" -H "x-correlation-id: $CID")
-          r="train $CAT $NUM $T ($UTC)"
-          for u in \
-            "https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=$CAT&date=2026-10-28&evaNumber=8010224&number=$NUM&time=$UTC" \
-            "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=Magdeburg&typ=ALL&limit=1" ; do
-            c=$(curl -s -o /tmp/b -w '%{http_code}' -m 25 "${H[@]}" "$u" || true); r="$r || ${u:26:50} => $c $(head -c 200 /tmp/b | tr -d '\n\"')"
+          sleep 210
+          for i in 1 2 3 4 5 6; do
+            d=$(curl -s -m 90 https://mvb-app.onrender.com/api/formation/diag)
+            echo "$d" | grep -q '"hosts"' && break; sleep 30
           done
-          c=$(curl -s -o /tmp/b -w '%{http_code}' -m 25 -A "$UA" "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=Magdeburg&typ=ALL&limit=1" || true); r="$r || UA-only orte => $c"
-          c=$(curl -s -o /tmp/b -w '%{http_code}' -m 25 "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=Magdeburg&typ=ALL&limit=1" || true); r="$r || plain curl orte => $c"
-          echo "::notice title=probe::$r"
+          echo "::notice title=probe::$(echo "$d" | head -c 1500)"
