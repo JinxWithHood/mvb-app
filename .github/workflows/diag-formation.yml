@@ -6,27 +6,30 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: bahnhof.de coach sequence pages
+      - name: bahnhof.de client API discovery
         shell: bash {0}
         run: |
           UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          curl -s -L -A "$UA" -m 30 https://www.bahnhof.de/magdeburg-hbf/abfahrt -o dep.html
-          grep -oE '/magdeburg-hbf/abfahrt/wagenreihung/[^"\\ ]+' dep.html | sort -u > links.txt
-          echo "LINKS $(wc -l < links.txt): $(head -3 links.txt | tr '\n' ' ')" > rep.txt
-          l=$(head -1 links.txt)
-          curl -s -L -A "$UA" -m 30 "https://www.bahnhof.de$l" -o wr.html
-          echo "WR $(wc -c < wr.html) bytes" >> rep.txt
-          python3 - <<'PY' >> rep.txt
-          import re
-          s = open('wr.html', encoding='utf-8', errors='replace').read()
-          s2 = s.replace('\\"', '"')
-          for k in ['platformPosition', 'wagonIdentificationNumber', 'vehicles', 'sectors', 'hasFirstClass', 'category', 'sector', 'orientation', 'vehicleID', 'groups']:
-              print(k, s2.count('"' + k + '"'))
-          i = s2.find('"vehicles"')
-          print('SNIP', re.sub(r'\s+', ' ', s2[max(0, i - 600): i + 1400]))
-          d = open('dep.html', encoding='utf-8', errors='replace').read().replace('\\"', '"')
-          j = d.find('wagenreihung/')
-          print('DEPSNIP', re.sub(r'\s+', ' ', d[max(0, j - 900): j + 300]))
+          mkdir -p js
+          for page in https://www.bahnhof.de/magdeburg-hbf/abfahrt https://www.bahnhof.de/magdeburg-hbf/abfahrt/wagenreihung/x/y; do
+            curl -s -L -A "$UA" -m 30 "$page" | grep -o '/_next/static/[^"]*\.js' >> chunks.txt
+          done
+          sort -u chunks.txt > c2.txt
+          i=0; while read c; do i=$((i+1)); curl -s -A "$UA" -m 20 "https://www.bahnhof.de$c" -o "js/$i.js"; done < c2.txt
+          python3 - <<'PY' > rep.txt
+          import re, glob
+          seen = set()
+          for f in glob.glob('js/*.js'):
+              s = open(f, encoding='utf-8', errors='replace').read()
+              for m in re.finditer(r'(fetch\(|"/api|`/api|/api/|baseUrl|apiUrl|NEXT_PUBLIC_[A-Z_]+|https://[a-z0-9.\-]+\.(?:de|com|net)[^"\'` ]{0,60})', s):
+                  snip = re.sub(r'\s+', ' ', s[max(0, m.start() - 60): m.end() + 90])
+                  key = snip[40:120]
+                  if key in seen: continue
+                  seen.add(key)
+                  if any(w in snip.lower() for w in ['api', 'fetch', 'http']):
+                      print(snip)
           PY
-          echo "::notice title=b1::$(head -c 3900 rep.txt | tr '\n' ' ')"
-          echo "::notice title=b2::$(tail -c +3900 rep.txt | head -c 3900 | tr '\n' ' ')"
+          grep -i "board\|depart\|journey\|sequence\|wagen\|coach\|ris\|api" rep.txt | head -60 > r2.txt
+          echo "::notice title=c1::$(head -c 3900 r2.txt | tr '\n' '~')"
+          echo "::notice title=c2::$(tail -c +3900 r2.txt | head -c 3900 | tr '\n' '~')"
+          echo "::notice title=c3::$(tail -c +7800 r2.txt | head -c 3900 | tr '\n' '~')"
