@@ -18,7 +18,7 @@ jobs:
           (async () => {
             const b = await chromium.launch();
             const p = await b.newPage({ locale: 'de-DE' });
-            const log = [];
+            const log = []; const flush = () => require("fs").writeFileSync("log.txt", log.join("\n")); setInterval(flush, 2000);
             p.on('response', async r => {
               const u = r.url(); const ct = r.headers()['content-type'] || '';
               if (/\.(js|css|woff2?|png|svg|jpg|webp|ico)(\?|$)/.test(u) || u.includes('/_next/static')) return;
@@ -26,21 +26,21 @@ jobs:
               try { if (/json|text\/x-component|text\/plain/.test(ct)) body = (await r.text()).slice(0, 300).replace(/\s+/g, ' '); } catch (e) {}
               log.push(`${r.request().method()} ${r.status()} ${u.slice(0, 220)} [${ct.slice(0, 30)}] hdr:${JSON.stringify(Object.keys(r.request().headers()).filter(h => /^(rsc|next-|x-)/i.test(h)))} ${body}`);
             });
-            await p.goto('https://www.bahnhof.de/magdeburg-hbf/abfahrt', { waitUntil: 'networkidle', timeout: 60000 });
-            await p.waitForTimeout(4000);
+            await p.goto('https://www.bahnhof.de/magdeburg-hbf/abfahrt', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await p.waitForTimeout(12000);
             const links = await p.$$eval('a[href*="wagenreihung"]', as => as.map(a => a.getAttribute('href')));
             log.push('LINKS ' + links.length + ' ' + links.slice(0, 3).join(' '));
             if (links[0]) {
               log.push('---- open coach sequence');
-              await p.goto('https://www.bahnhof.de' + links[0], { waitUntil: 'networkidle', timeout: 60000 });
-              await p.waitForTimeout(3000);
+              await p.goto('https://www.bahnhof.de' + links[0], { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await p.waitForTimeout(10000);
               const html = await p.content();
               const i = html.indexOf('Wagen');
               log.push('TEXT ' + (await p.innerText('main').catch(() => '')).slice(0, 600).replace(/\s+/g, ' '));
             }
             require('fs').writeFileSync('log.txt', log.join('\n'));
             await b.close();
-          })();
+          })().catch(e => { require('fs').appendFileSync('log.txt', 'ERR ' + e.message.slice(0, 300)); });
           JS
           node w.js > run.txt 2>&1 || { echo "node failed: $(tail -c 1500 run.txt) / $(tail -c 800 inst.txt)" > log.txt; }
           grep -v "google\|analytics\|sentry\|consent\|usercentrics\|matomo\|etracker" log.txt > l2.txt
