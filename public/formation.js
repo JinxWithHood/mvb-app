@@ -302,7 +302,7 @@
     const ARROW_R = 'M5 12h14M13 6l6 6-6 6';
     const arrowSvg = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
 
-    function render(slot, data, dep) {
+    function render(slot, data, dep, onReady) {
         if (!slot || !slot.isConnected) return;
         if (!data) { slot.remove(); return; }
         const cars = data.cars;
@@ -343,12 +343,19 @@
             }).join('') + '</div>';
         }
 
+        let head = '';
+        if (slot.classList.contains('fm-detail')) {
+            const allSecs = [...new Set(cars.map((c) => c.sector).filter(Boolean))].sort();
+            head = `<div class="fm-head"><strong>${data.platform ? 'Gleis ' + esc(data.platform) : 'Gleisbelegung'}</strong>${allSecs.length ? `<span>Abschnitte ${esc(allSecs[0])}–${esc(allSecs[allSecs.length - 1])}</span>` : ''}<span>${cars.filter((c) => c.kind !== 'loco' && c.kind !== 'powercar').length} Wagen</span></div>`;
+        }
         slot.innerHTML = `<div class="fm" aria-label="Wagenreihung">
+            ${head}
             <div class="fm-scroll"><div class="fm-train">${html}</div></div>
             ${split}
             <div class="fm-meta">${chips.join('')}</div>
         </div>`;
         slot.classList.add('ready');
+        if (onReady) { try { onReady(data); } catch (e) { /* ignore */ } }
         const fit = () => {
             const sc = slot.querySelector('.fm-scroll');
             if (sc && sc.scrollWidth > sc.clientWidth + 4) {
@@ -371,13 +378,13 @@
     }
 
     // fill `slot` (already in the page) for one request; `watch` = element whose visibility starts the load
-    function mount(slot, req, info, watch) {
+    function mount(slot, req, info, watch, onReady) {
         slot.addEventListener('click', (e) => { if (e.target.closest('.fm-scroll')) e.stopPropagation(); });
         const hit = cached(req.key);
-        if (hit !== undefined) { render(slot, hit, info); return; }
+        if (hit !== undefined) { render(slot, hit, info, onReady); return; }
         whenVisible(watch || slot, () => {
             if (Date.now() < disabledUntil) { slot.remove(); return; }
-            load(req).then((data) => render(slot, data, info));
+            load(req).then((data) => render(slot, data, info, onReady));
         });
     }
 
@@ -403,8 +410,8 @@
     function attachDetail(anchor, dep, station) {
         try {
             if (!anchor || !anchor.parentNode) return;
-            const old = anchor.parentNode.querySelector(':scope > .fm-detail');
-            if (old) old.remove();
+            anchor.parentNode.querySelectorAll(':scope > .fm-detail, :scope > .fm-tabs').forEach((el) => el.remove());
+            anchor.style.display = '';
             if (!dep || !TRAIN_TYPES.has(dep.type) || !dep.trainCat || !dep.trainNum || dep.cancelled) return;
             if (Date.now() < disabledUntil) return;
             const eva = dep.fromEva || evaOf(station || { id: dep.station_id });
@@ -412,9 +419,33 @@
             const req = requestOf(dep, eva);
             if (!usable(req)) return;
             const slot = document.createElement('div');
-            slot.className = 'fm-slot fm-detail';
+            slot.className = 'fm-slot fm-detail fm-off';
             anchor.parentNode.insertBefore(slot, anchor);
-            mount(slot, req, dep, slot.parentNode);
+            // once a formation exists: switch "Echtzeit" (stops) <-> "Gleisbelegung" (formation)
+            mount(slot, req, dep, slot.parentNode, () => {
+                if (!slot.isConnected || slot.previousElementSibling && slot.previousElementSibling.classList.contains('fm-tabs')) return;
+                const tabs = document.createElement('div');
+                tabs.className = 'fm-tabs';
+                tabs.setAttribute('role', 'tablist');
+                tabs.innerHTML = '<button type="button" role="tab" aria-selected="true" data-v="live">Echtzeit</button>'
+                    + '<button type="button" role="tab" aria-selected="false" data-v="track">Gleisbelegung</button>';
+                slot.parentNode.insertBefore(tabs, slot);
+                tabs.addEventListener('click', (e) => {
+                    const b = e.target.closest('button');
+                    if (!b) return;
+                    const track = b.dataset.v === 'track';
+                    tabs.querySelectorAll('button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+                    slot.classList.toggle('fm-off', !track);
+                    anchor.style.display = track ? 'none' : '';
+                    if (track) {
+                        const sc = slot.querySelector('.fm-scroll');
+                        if (sc && sc.scrollWidth > sc.clientWidth + 4) {
+                            sc.classList.add('overflow');
+                            if (slot.querySelector('.fm-lead:last-child')) sc.scrollLeft = sc.scrollWidth;
+                        }
+                    }
+                });
+            });
         } catch (e) { /* optional */ }
     }
 
