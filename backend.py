@@ -306,11 +306,9 @@ except Exception as e:
     print(f"[WARN] Could not initialise NASA client: {e}")
     nasa_client = None
 
-try:
-    db_client = HafasClient(DBProfile())
-except Exception as e:
-    print(f"[WARN] Could not initialise DB client: {e}")
-    db_client = None
+# The old DB HAFAS (reiseauskunft.bahn.de) was switched off by Deutsche Bahn – the host no longer
+# exists, every call only produced "Failed to resolve" warnings. bahn.de data comes via dbweb.py.
+db_client = None
 
 try:
     oebb_client = HafasClient(OEBBProfile())
