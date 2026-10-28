@@ -4443,9 +4443,10 @@ def api_formation_diag():
             params = {'administrationId': 80, 'category': probe['trainCat'], 'date': utc.strftime('%Y-%m-%d'),
                       'evaNumber': '8010224', 'number': probe['trainNum'], 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')}
             out['probe'] = {'train': f"{probe['trainCat']} {probe['trainNum']}", 'time': probe['time']}
-            for host in formation.HOSTS:
+            out['relayConfigured'] = bool(formation.RELAY_URL)
+            for host, url, headers in formation.sources():
                 try:
-                    r = formation._session.get(host + formation.PATH, params=params, timeout=8)
+                    r = formation._session.get(url, params=params, headers=headers, timeout=10)
                     info = {'status': r.status_code, 'bytes': len(r.content)}
                     try:
                         j = r.json()

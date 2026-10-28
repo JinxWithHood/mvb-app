@@ -9,6 +9,7 @@ Alles hier ist "best effort": Gibt es keine Daten oder sperrt bahn.de den Server
 liefert die App einfach keine Wagenreihung – sonst ändert sich nichts.
 """
 import datetime
+import os
 import re
 import threading
 import time
@@ -24,6 +25,10 @@ except Exception:  # pragma: no cover
 
 PATH = '/web/api/reisebegleitung/wagenreihung/vehicle-sequence'
 HOSTS = ['https://www.bahn.de', 'https://int.bahn.de']
+# bahn.de blocks datacenter IPs (Render too). A small relay on a normal connection
+# (e.g. a Cloudflare Worker, see relay/) can be set in Render: FORMATION_RELAY_URL + FORMATION_RELAY_KEY
+RELAY_URL = (os.environ.get('FORMATION_RELAY_URL') or '').strip()
+RELAY_KEY = (os.environ.get('FORMATION_RELAY_KEY') or '').strip()
 BLOCK_PAUSE = 15 * 60
 OK_TTL = 120
 MISS_TTL = 600
@@ -101,9 +106,18 @@ def _cache_put(key, val, ttl):
         _cache[key] = (time.time() + ttl, val)
 
 
+def sources():
+    """[(name, url, headers)] in the order they are tried."""
+    out = []
+    if RELAY_URL.startswith('https://'):
+        out.append(('relay', RELAY_URL, {'X-Relay-Key': RELAY_KEY}))
+    out += [(h, h + PATH, {}) for h in HOSTS]
+    return out
+
+
 def all_blocked():
     now = time.time()
-    return all(_blocked.get(h, 0) > now for h in HOSTS)
+    return all(_blocked.get(name, 0) > now for name, _, _ in sources())
 
 
 def fetch(eva, cat, num, dep_local):
@@ -119,16 +133,16 @@ def fetch(eva, cat, num, dep_local):
         'evaNumber': eva, 'number': num, 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
     }
     tried = False
-    for host in HOSTS:
-        if _blocked.get(host, 0) > time.time():
+    for name, url, headers in sources():
+        if _blocked.get(name, 0) > time.time():
             continue
         tried = True
         try:
-            r = _session.get(host + PATH, params=params, timeout=8)
+            r = _session.get(url, params=params, headers=headers, timeout=10)
         except requests.RequestException:
             continue
-        if r.status_code == 403:
-            _blocked[host] = time.time() + BLOCK_PAUSE
+        if r.status_code in (401, 403, 452):
+            _blocked[name] = time.time() + BLOCK_PAUSE
             continue
         if r.status_code in (204, 404) or r.status_code >= 400:
             _cache_put(key, {}, MISS_TTL if r.status_code in (204, 404) else 60)
