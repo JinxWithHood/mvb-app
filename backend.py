@@ -4393,6 +4393,51 @@ def _tr_ident_inner(s):
     return cat, num
 
 
+_fm_diag = {'at': 0, 'data': None}
+
+
+@app.route('/api/formation/diag')
+def api_formation_diag():
+    """Read-only check: do departures carry train numbers, and does bahn.de answer this server?"""
+    if _fm_diag['data'] and time.time() - _fm_diag['at'] < 120:
+        return jsonify(_fm_diag['data'])
+    out = {'checkedAt': datetime.datetime.now(local_tz).strftime('%H:%M:%S'), 'trains': [], 'hosts': {}}
+    try:
+        with app.test_client() as c:
+            deps = c.get('/api/departures?station_id=8010224&station_name=Magdeburg%20Hbf&duration=120').get_json() or []
+        if isinstance(deps, dict):
+            deps = []
+        trains = [d for d in deps if d.get('type') in _TRAIN_TYPES]
+        out['departures'] = len(deps)
+        out['trainCount'] = len(trains)
+        out['trains'] = [{k: d.get(k) for k in ('line', 'time', 'type', 'trainCat', 'trainNum', 'occupancy', 'src')} for d in trains[:8]]
+        probe = next((d for d in trains if d.get('trainCat') and d.get('trainNum')), None)
+        if probe:
+            when = datetime.datetime.combine(datetime.datetime.now(local_tz).date() + datetime.timedelta(days=probe.get('day_offset') or 0),
+                                             datetime.datetime.strptime(probe['time'], '%H:%M').time())
+            utc = local_tz.localize(when).astimezone(datetime.timezone.utc)
+            params = {'administrationId': 80, 'category': probe['trainCat'], 'date': utc.strftime('%Y-%m-%d'),
+                      'evaNumber': '8010224', 'number': probe['trainNum'], 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')}
+            out['probe'] = {'train': f"{probe['trainCat']} {probe['trainNum']}", 'time': probe['time']}
+            for host in formation.HOSTS:
+                try:
+                    r = formation._session.get(host + formation.PATH, params=params, timeout=8)
+                    info = {'status': r.status_code, 'bytes': len(r.content)}
+                    try:
+                        j = r.json()
+                        info['groups'] = len(j.get('groups') or []) if isinstance(j, dict) else None
+                        info['keys'] = sorted(j.keys())[:12] if isinstance(j, dict) else None
+                    except ValueError:
+                        info['text'] = r.text[:120]
+                    out['hosts'][host] = info
+                except Exception as ex:
+                    out['hosts'][host] = {'error': ex.__class__.__name__}
+    except Exception as ex:
+        out['error'] = f'{ex.__class__.__name__}: {ex}'[:200]
+    _fm_diag.update(at=time.time(), data=out)
+    return jsonify(out)
+
+
 @app.route('/api/formation')
 def api_formation():
     """Wagenreihung for one train departure: eva, cat, num, date (YYYY-MM-DD), time (HH:MM, planned)."""
