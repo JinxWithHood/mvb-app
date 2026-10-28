@@ -6,30 +6,22 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: bahnhof.de client API discovery
+      - name: bahnhof.de departure data
         shell: bash {0}
         run: |
           UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          mkdir -p js
-          for page in https://www.bahnhof.de/magdeburg-hbf/abfahrt https://www.bahnhof.de/magdeburg-hbf/abfahrt/wagenreihung/x/y; do
-            curl -s -L -A "$UA" -m 30 "$page" | grep -o '/_next/static/[^"]*\.js' >> chunks.txt
-          done
-          sort -u chunks.txt > c2.txt
-          i=0; while read c; do i=$((i+1)); curl -s -A "$UA" -m 20 "https://www.bahnhof.de$c" -o "js/$i.js"; done < c2.txt
+          curl -s -L -A "$UA" -m 30 https://www.bahnhof.de/magdeburg-hbf/abfahrt -o dep.html
+          curl -s -L -A "$UA" -H 'RSC: 1' -m 30 https://www.bahnhof.de/magdeburg-hbf/abfahrt -o dep.rsc
           python3 - <<'PY' > rep.txt
-          import re, glob
-          seen = set()
-          for f in glob.glob('js/*.js'):
-              s = open(f, encoding='utf-8', errors='replace').read()
-              for m in re.finditer(r'(fetch\(|"/api|`/api|/api/|baseUrl|apiUrl|NEXT_PUBLIC_[A-Z_]+|https://[a-z0-9.\-]+\.(?:de|com|net)[^"\'` ]{0,60})', s):
-                  snip = re.sub(r'\s+', ' ', s[max(0, m.start() - 60): m.end() + 90])
-                  key = snip[40:120]
-                  if key in seen: continue
-                  seen.add(key)
-                  if any(w in snip.lower() for w in ['api', 'fetch', 'http']):
-                      print(snip)
+          import re
+          for fn in ['dep.html', 'dep.rsc']:
+              s = open(fn, encoding='utf-8', errors='replace').read().replace('\\"', '"')
+              print(fn, len(s), {k: s.count(k) for k in ['journeyID', 'journeyId', 'departureID', 'ICE', 'RE ', 'wagenreihung', 'coach', 'evaNumber', 'hasCoachSequence', 'sequence']})
+              for k in ['journeyId', 'journeyID', 'ICE']:
+                  i = s.find(k)
+                  if i >= 0:
+                      print('SNIP', fn, k, re.sub(r'\s+', ' ', s[max(0, i - 300): i + 700]))
+                      break
           PY
-          grep -i "board\|depart\|journey\|sequence\|wagen\|coach\|ris\|api" rep.txt | head -60 > r2.txt
-          echo "::notice title=c1::$(head -c 3900 r2.txt | tr '\n' '~')"
-          echo "::notice title=c2::$(tail -c +3900 r2.txt | head -c 3900 | tr '\n' '~')"
-          echo "::notice title=c3::$(tail -c +7800 r2.txt | head -c 3900 | tr '\n' '~')"
+          echo "::notice title=d1::$(head -c 3900 rep.txt | tr '\n' '~')"
+          echo "::notice title=d2::$(tail -c +3900 rep.txt | head -c 3900 | tr '\n' '~')"
