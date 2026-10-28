@@ -1,0 +1,16 @@
+name: diag-formation
+on:
+  push:
+    branches: [diag-formation]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe live Render endpoint
+        run: |
+          for i in $(seq 1 30); do
+            out=$(curl -s -m 60 https://mvb-app.onrender.com/api/formation/diag || true)
+            if echo "$out" | grep -q '"trains"'; then echo "$out"; break; fi
+            echo "waiting for deploy ($i)"; sleep 20
+          done
+          echo "---- status"; curl -s -m 30 https://mvb-app.onrender.com/api/status
