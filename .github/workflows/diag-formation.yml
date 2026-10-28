@@ -6,13 +6,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Check what Render serves
+      - name: Explore bahnhof.de coach sequence API
         shell: bash {0}
         run: |
-          B=https://mvb-app.onrender.com
-          v=$(curl -s -m 90 "$B/" | grep -o 'formation.js?v=[0-9.]*\|app.js?v=[0-9.]*\|styles.css?v=[0-9.]*' | tr '\n' ' ')
-          f=$(curl -s -m 60 "$B/formation.js" | grep -c 'fetchDirect')
-          sw=$(curl -s -m 60 "$B/sw.js" | grep -o "mvb-magdeburg-cache-v[0-9-]*")
-          fs=$(curl -s -m 60 -o /dev/null -w '%{http_code}' "$B/formation.js")
-          d=$(curl -s -m 90 "$B/api/formation/diag" | head -c 600)
-          echo "::notice title=render::index: $v | formation.js http $fs, fetchDirect=$f | sw: $sw | diag: $d"
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+          mkdir -p js
+          for page in https://www.bahnhof.de/magdeburg-hbf/abfahrt https://www.bahnhof.de/magdeburg-hbf https://www.bahnhof.de/entdecken/wagenreihung; do
+            code=$(curl -s -L -A "$UA" -o page.html -w '%{http_code}' -m 30 "$page")
+            echo "PAGE $page $code $(wc -c < page.html)" >> rep.txt
+            grep -o '/_next/static/[^"]*\.js' page.html | sort -u >> chunks.txt
+          done
+          sort -u chunks.txt > c2.txt; echo "CHUNKS $(wc -l < c2.txt)" >> rep.txt
+          i=0; while read c; do i=$((i+1)); curl -s -A "$UA" -m 20 "https://www.bahnhof.de$c" -o "js/$i.js"; done < c2.txt
+          grep -ohE '"/api/[A-Za-z0-9_/\-\{\}\$\.]*|`/api/[^`]{0,80}`|api/[a-z\-]*(wagen|vehicle|sequence|formation|coach)[^"`]{0,60}' js/*.js page.html | sort -u | head -60 >> rep.txt
+          grep -ohiE '.{0,80}(wagenreihung|vehicle-sequence|vehiclesequence|coachsequence|coach-sequence|formation).{0,80}' js/*.js | sort -u | head -25 >> rep.txt
+          echo "::notice title=bahnhof::$(cat rep.txt | tr '\n' ' ' | head -c 3900)"
+          echo "::notice title=bahnhof2::$(cat rep.txt | tr '\n' ' ' | tail -c +3900 | head -c 3900)"
