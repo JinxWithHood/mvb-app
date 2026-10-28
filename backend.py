@@ -4465,7 +4465,8 @@ def api_formation_diag():
 # bahn.de sperrt Rechenzentren. Ein kleines Programm auf einem Rechner mit normalem Internet
 # (relay/wagenreihung_helfer.py) fragt hier nach offenen Aufträgen, holt die Wagenreihung bei
 # bahn.de und schickt sie zurück. Kein offener Port nötig. Schlüssel: FORMATION_AGENT_KEY.
-_AGENT_KEY = (os.environ.get('FORMATION_AGENT_KEY') or '').strip()
+# own key, or simply the same password as the Cloudflare relay (FORMATION_RELAY_KEY)
+_AGENT_KEY = (os.environ.get('FORMATION_AGENT_KEY') or os.environ.get('FORMATION_RELAY_KEY') or '').strip()
 _agent = {'seen': 0.0}
 _fm_jobs = {}            # key -> {'params':…, 'at': ts, 'taken': ts}
 _fm_jobs_lock = threading.Lock()
