@@ -9,7 +9,7 @@ jobs:
       - name: Render diag after deploy
         shell: bash {0}
         run: |
-          sleep 210
+          sleep 125
           for i in 1 2 3 4 5 6; do
             d=$(curl -s -m 90 https://mvb-app.onrender.com/api/formation/diag)
             echo "$d" | grep -q '"hosts"' && break; sleep 30
