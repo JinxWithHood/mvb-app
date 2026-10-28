@@ -1,0 +1,51 @@
+name: diag-formation
+on:
+  push:
+    branches: [diag-formation]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe other DB sources
+        shell: bash {0}
+        run: |
+          cat > p.py <<'PY'
+          import json, urllib.request, urllib.parse, datetime, uuid, re
+          UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36'
+          def req(url, method='GET', body=None, h=None):
+              hh = {'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'de-DE'}
+              hh.update(h or {})
+              data = json.dumps(body).encode() if body is not None else None
+              r = urllib.request.Request(url, data=data, method=method, headers=hh)
+              try:
+                  with urllib.request.urlopen(r, timeout=20) as x:
+                      return x.status, x.read().decode('utf-8', 'replace')
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:300].decode('utf-8', 'replace')
+              except Exception as e:
+                  return 'ERR', str(e)[:100]
+          def keys_like(txt, pat='format|wagen|vehicle|sequence|coach|wagon|reihung'):
+              return sorted(set(re.findall(r'"([A-Za-z]*(?:%s)[A-Za-z]*)"' % pat, txt, re.I)))[:20]
+          d = json.loads(urllib.request.urlopen('https://mvb-app.onrender.com/api/formation/diag', timeout=90).read())
+          t = next((x for x in d.get('trains', []) if x.get('trainCat') in ('ICE', 'IC', 'EC')), (d.get('trains') or [{}])[0])
+          out = {'train': t}
+          h, m = map(int, t['time'].split(':'))
+          now = datetime.datetime.utcnow()
+          utc = datetime.datetime(now.year, now.month, now.day, h, m) - datetime.timedelta(hours=1)
+          q = urllib.parse.urlencode({'administrationId': 80, 'category': t['trainCat'], 'date': utc.strftime('%Y-%m-%d'), 'evaNumber': '8010224', 'number': t['trainNum'], 'time': utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')})
+          vh = lambda ct: {'X-Correlation-ID': f'{uuid.uuid4()}_{uuid.uuid4()}', 'Accept': ct, 'Content-Type': ct}
+          st, b = req('https://app.services-bahn.de/mob/location/search', 'POST', {'searchTerm': 'Magdeburg Hbf', 'locationTypes': ['ST'], 'maxResults': 1}, vh('application/x.db.vendo.mob.location.v3+json'))
+          out['mob location'] = [st, b[:120]]
+          for path in ['/mob/reisebegleitung/wagenreihung/vehicle-sequence', '/mob/wagenreihung/vehicle-sequence', '/mob/vehicle-sequence', '/mob/wagenreihung']:
+              for ct in ['application/json', 'application/x.db.vendo.mob.wagenreihung.v3+json']:
+                  st, b = req('https://app.services-bahn.de' + path + '?' + q, h=vh(ct))
+                  out[f'mob {path} {ct[-25:]}'] = [st, b[:140]]
+          ts = (datetime.datetime.utcnow()).strftime('%Y-%m-%dT%H:%M:%S.000Z'); te = (datetime.datetime.utcnow() + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          st, b = req('https://regio-guide.de/@prd/zupo-travel-information/api/public/ri/board/departure/8010224?' + urllib.parse.urlencode({'timeStart': ts, 'timeEnd': te, 'expandTimeFrame': 'TIME_END'}))
+          out['regioguide board'] = [st, len(b), keys_like(b), b[:200] if st != 200 else '']
+          st, b = req('https://www.bahnhof.de/api/boards/departures?evaNumbers=8010224&duration=60&sortBy=TIME_SCHEDULE&locale=de')
+          out['bahnhof.de board'] = [st, len(b), keys_like(b), b[:200] if st != 200 else '']
+          print(json.dumps(out)[:3900])
+          PY
+          res=$(python3 p.py 2>&1 | grep -v Deprecation | tr -d '\n' | head -c 3900)
+          echo "::notice title=probe::$res"
