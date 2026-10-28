@@ -10,7 +10,7 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             out=$(curl -s -m 60 https://mvb-app.onrender.com/api/formation/diag || true)
-            if echo "$out" | grep -q '"trains"'; then echo "$out"; break; fi
+            if echo "$out" | grep -q '"trains"'; then echo "::notice title=diag::$(echo "$out" | tr -d '\n' | head -c 3800)"; break; fi
             echo "waiting for deploy ($i)"; sleep 20
           done
           echo "---- status"; curl -s -m 30 https://mvb-app.onrender.com/api/status
