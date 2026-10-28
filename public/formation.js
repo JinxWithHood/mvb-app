@@ -36,7 +36,88 @@
         const qs = `eva=${eva}&cat=${encodeURIComponent(dep.trainCat)}&num=${encodeURIComponent(dep.trainNum)}&date=${date}&time=${encodeURIComponent(dep.time)}`;
         const [h, mi] = String(dep.time).split(':').map(Number);
         const at = new Date(d); at.setHours(h, mi, 0, 0);
-        return { key, qs, at };
+        // the same request straight to bahn.de (time in UTC, as bahn.de expects it)
+        const direct = 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?' + new URLSearchParams({
+            administrationId: '80', category: dep.trainCat, date: at.toISOString().slice(0, 10),
+            evaNumber: eva, number: dep.trainNum, time: at.toISOString().replace(/\.\d{3}Z$/, '.000Z'),
+        }).toString();
+        return { key, qs, at, direct };
+    }
+
+    // ------------------------------------------------------------------
+    // bahn.de answer -> app format (mirror of formation.py normalize)
+    // ------------------------------------------------------------------
+    const AMENITY = { BISTRO: 'bistro', ZONE_QUIET: 'quiet', ZONE_FAMILY: 'family', WHEELCHAIR_SPACE: 'wheelchair', BIKE_SPACE: 'bike', SEATS_BAHN_COMFORT: 'comfort', CABIN_INFANT: 'infant', TOILET_WHEELCHAIR: 'wc' };
+    const num = (x) => { const n = parseFloat(x); return Number.isFinite(n) ? n : null; };
+    function normalize(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const pf = raw.platform || {};
+        const p0 = num(pf.start), p1 = num(pf.end);
+        if (p0 == null || p1 == null || p1 <= p0) return null;
+        const pct = (v) => Math.round(Math.max(0, Math.min(100, (v - p0) * 100 / (p1 - p0))) * 100) / 100;
+        const groups = [], cars = [], listed = [];
+        (raw.groups || []).forEach((g, gi) => {
+            const vehicles = g.vehicles || [];
+            const hauled = vehicles.some((v) => ['LOCOMOTIVE', 'POWERCAR'].includes(String((v.type || {}).category || '').toUpperCase()));
+            const gcars = [];
+            vehicles.forEach((v) => {
+                const pos = v.platformPosition || {};
+                const a = num(pos.start), b = num(pos.end);
+                if (a == null || b == null) return;
+                const t = v.type || {};
+                const cat = String(t.category || '').toUpperCase();
+                const first = !!t.hasFirstClass, second = !!t.hasEconomyClass;
+                const amen = [];
+                (v.amenities || []).forEach((am) => { const k = AMENITY[(am || {}).type]; if (k && !amen.includes(k)) amen.push(k); });
+                let kind, cls = null;
+                if (cat === 'LOCOMOTIVE') kind = 'loco';
+                else if (cat === 'POWERCAR') kind = 'powercar';
+                else {
+                    const dd = cat.includes('DOUBLEDECK'), cab = cat.includes('CONTROLCAR');
+                    kind = dd ? (cab ? 'ddcab' : 'dd') : (cab ? 'cab' : 'car');
+                    if (cat.includes('DININGCAR') && !first && !second) cls = 'B';
+                    else if (first && second) cls = '12';
+                    else if (first) cls = '1';
+                    else if (second) cls = '2';
+                    else if (cat.includes('DINING')) cls = 'B';
+                    if (cat.includes('DININGCAR') && !amen.includes('bistro')) amen.unshift('bistro');
+                }
+                const car = {
+                    num: String(v.wagonIdentificationNumber || '').trim() || null, cls, kind, sector: pos.sector || null,
+                    start: pct(Math.min(a, b)), end: pct(Math.max(a, b)), closed: String(v.status || '').toUpperCase() === 'CLOSED',
+                    amenities: amen.slice(0, 4), group: gi, multipleUnit: !hauled,
+                };
+                gcars.push(car); listed.push(car);
+            });
+            if (!gcars.length) return;
+            const tr = g.transport || {};
+            groups.push({ index: gi, cat: tr.category || null, num: tr.number != null ? String(tr.number) : null, destination: ((tr.destination || {}).name || '').trim() || null });
+            cars.push(...gcars);
+        });
+        if (!cars.length) return null;
+        let direction = null;
+        if (listed.length > 1) direction = listed[0].start > listed[listed.length - 1].start ? 'right' : 'left';
+        cars.sort((x, y) => x.start - y.start);
+        [...new Set(cars.map((c) => c.group))].forEach((gi) => {
+            const gc = cars.filter((c) => c.group === gi);
+            const head = gc[0], tail = gc[gc.length - 1];
+            if ((head.multipleUnit && ['car', 'cab'].includes(head.kind)) || head.kind === 'powercar') head.nose = 'left';
+            if ((tail.multipleUnit && ['car', 'cab'].includes(tail.kind)) || tail.kind === 'powercar') tail.nose = 'right';
+            gc.forEach((c) => { if (['ddcab', 'cab'].includes(c.kind) && !c.nose) c.nose = c === head ? 'left' : 'right'; });
+        });
+        const dests = new Set(groups.map((g) => g.destination).filter(Boolean));
+        return { available: true, platform: raw.departurePlatform || raw.departurePlatformSchedule || null, direction, groups, split: groups.length > 1 && dests.size > 1, cars };
+    }
+
+    // Our server is blocked by bahn.de (datacenter IP) -> ask bahn.de straight from this device.
+    let serverBlocked = false;
+    let directBroken = false;
+    function fetchDirect(url) {
+        if (directBroken) return Promise.resolve(null);
+        return fetch(url, { credentials: 'omit', mode: 'cors' })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((raw) => normalize(raw))
+            .catch(() => { directBroken = true; return null; });   // CORS / network: stop trying
     }
 
     function cached(key) {
@@ -50,12 +131,19 @@
         while (running < MAX_PARALLEL && queue.length) {
             const job = queue.shift();
             running++;
-            fetch(`${apiBase()}/formation?${job.qs}`)
-                .then((r) => r.json().catch(() => ({})))
-                .catch(() => ({}))
+            const viaServer = serverBlocked ? Promise.resolve({ blocked: true }) :
+                fetch(`${apiBase()}/formation?${job.qs}`).then((r) => r.json().catch(() => ({}))).catch(() => ({}));
+            viaServer
                 .then((data) => {
-                    if (data && data.blocked) disabledUntil = Date.now() + 10 * 60 * 1000;
+                    if (data && data.blocked) {
+                        serverBlocked = true;
+                        return fetchDirect(job.direct);
+                    }
+                    return data && data.available ? data : null;
+                })
+                .then((data) => {
                     const ok = data && data.available && Array.isArray(data.cars) && data.cars.length ? data : null;
+                    if (directBroken && serverBlocked) disabledUntil = Date.now() + 30 * 60 * 1000;
                     cache.set(job.key, { at: Date.now(), data: ok });
                     job.resolve(ok);
                 })
@@ -66,7 +154,7 @@
     function load(req) {
         const hit = cache.get(req.key);
         if (hit && hit.promise) return hit.promise;
-        const promise = new Promise((resolve) => queue.push({ key: req.key, qs: req.qs, resolve }));
+        const promise = new Promise((resolve) => queue.push({ key: req.key, qs: req.qs, direct: req.direct, resolve }));
         cache.set(req.key, { promise });
         pump();
         return promise;
