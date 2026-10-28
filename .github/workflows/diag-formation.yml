@@ -12,7 +12,7 @@ jobs:
       - name: Watch bahnhof.de network traffic
         shell: bash {0}
         run: |
-          npm i playwright@1.47.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
+          npm i playwright@1.47.2 > inst.txt 2>&1; npx playwright install --with-deps chromium >> inst.txt 2>&1
           cat > w.js <<'JS'
           const { chromium } = require('playwright');
           (async () => {
@@ -42,6 +42,6 @@ jobs:
             await b.close();
           })();
           JS
-          node w.js || echo "node failed" > log.txt
+          node w.js > run.txt 2>&1 || { echo "node failed: $(tail -c 1500 run.txt) / $(tail -c 800 inst.txt)" > log.txt; }
           grep -v "google\|analytics\|sentry\|consent\|usercentrics\|matomo\|etracker" log.txt > l2.txt
           for i in 0 1 2 3 4 5; do part=$(tail -c +$((i*3800+1)) l2.txt | head -c 3800 | tr '\n' '~'); [ -z "$part" ] && break; echo "::notice title=n$i::$part"; done
