@@ -1377,7 +1377,7 @@ def get_departures():
                     "journey_id": dep_raw_id,
                     "line": line_name,
                     "raw_line": line_name,
-                    "direction": dep_direction,
+                    "direction": re.sub(r'\s+', ' ', dep_direction or '').strip(),
                     "originalDirection": original_direction if is_diverted else None,
                     "isDiverted": is_diverted,
                     "diversion": div_info if is_diverted else None,
