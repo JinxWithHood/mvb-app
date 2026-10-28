@@ -29,17 +29,24 @@
     }
 
     function requestOf(dep, eva) {
-        const d = new Date();
-        d.setDate(d.getDate() + (dep.day_offset || 0));
-        const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        const key = `${eva}|${dep.trainCat}|${dep.trainNum}|${date}|${dep.time}`;
-        const qs = `eva=${eva}&cat=${encodeURIComponent(dep.trainCat)}&num=${encodeURIComponent(dep.trainNum)}&date=${date}&time=${encodeURIComponent(dep.time)}`;
+        const at = new Date();
+        at.setDate(at.getDate() + (dep.day_offset || 0));
         const [h, mi] = String(dep.time).split(':').map(Number);
-        const at = new Date(d); at.setHours(h, mi, 0, 0);
+        at.setHours(h, mi, 0, 0);
+        return requestAt({ eva, trainCat: dep.trainCat, trainNum: dep.trainNum, at });
+    }
+
+    // planned departure of one train at one station -> our API request + the direct bahn.de request
+    function requestAt(o) {
+        const at = o.at;
+        const date = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+        const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+        const key = `${o.eva}|${o.trainCat}|${o.trainNum}|${date}|${time}`;
+        const qs = `eva=${o.eva}&cat=${encodeURIComponent(o.trainCat)}&num=${encodeURIComponent(o.trainNum)}&date=${date}&time=${encodeURIComponent(time)}`;
         // the same request straight to bahn.de (time in UTC, as bahn.de expects it)
         const direct = 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?' + new URLSearchParams({
-            administrationId: '80', category: dep.trainCat, date: at.toISOString().slice(0, 10),
-            evaNumber: eva, number: dep.trainNum, time: at.toISOString().replace(/\.\d{3}Z$/, '.000Z'),
+            administrationId: '80', category: o.trainCat, date: at.toISOString().slice(0, 10),
+            evaNumber: o.eva, number: o.trainNum, time: at.toISOString().replace(/\.\d{3}Z$/, '.000Z'),
         }).toString();
         return { key, qs, at, direct };
     }
@@ -319,15 +326,39 @@
             <div class="fm-meta">${chips.join('')}</div>
         </div>`;
         slot.classList.add('ready');
-        requestAnimationFrame(() => {
+        const fit = () => {
             const sc = slot.querySelector('.fm-scroll');
             if (sc && sc.scrollWidth > sc.clientWidth + 4) {
                 sc.classList.add('overflow');
-                if (dir === 'right') sc.scrollLeft = sc.scrollWidth;
+                if (dir === 'right' && !sc.dataset.touched) sc.scrollLeft = sc.scrollWidth;
+                const edge = () => sc.classList.toggle('at-end', sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 2);
+                edge();
+                if (!sc.dataset.edge) { sc.dataset.edge = '1'; sc.addEventListener('scroll', edge, { passive: true }); }
             }
+        };
+        const sc0 = slot.querySelector('.fm-scroll');
+        if (sc0) sc0.addEventListener('pointerdown', () => { sc0.dataset.touched = '1'; }, { once: true });
+        requestAnimationFrame(fit);
+        setTimeout(fit, 350);
+    }
+
+    function usable(req) {
+        const mins = (req.at - Date.now()) / 60000;
+        return mins >= -30 && mins <= 6 * 60;          // bahn.de knows formations only around departure
+    }
+
+    // fill `slot` (already in the page) for one request; `watch` = element whose visibility starts the load
+    function mount(slot, req, info, watch) {
+        slot.addEventListener('click', (e) => { if (e.target.closest('.fm-scroll')) e.stopPropagation(); });
+        const hit = cached(req.key);
+        if (hit !== undefined) { render(slot, hit, info); return; }
+        whenVisible(watch || slot, () => {
+            if (Date.now() < disabledUntil) { slot.remove(); return; }
+            load(req).then((data) => render(slot, data, info));
         });
     }
 
+    // departure list card
     function attach(card, dep, station) {
         try {
             if (!card || !dep || !TRAIN_TYPES.has(dep.type) || !dep.trainCat || !dep.trainNum || dep.cancelled) return;
@@ -335,21 +366,47 @@
             const eva = evaOf(station);
             if (!eva) return;
             const req = requestOf(dep, eva);
-            const mins = (req.at - Date.now()) / 60000;
-            if (mins < -30 || mins > 6 * 60) return;      // bahn.de knows formations only around departure
+            if (!usable(req)) return;
             const slot = document.createElement('div');
             slot.className = 'fm-slot';
-            slot.addEventListener('click', (e) => { if (e.target.closest('.fm-scroll')) e.stopPropagation(); });
             card.appendChild(slot);
-            const hit = cached(req.key);
-            if (hit !== undefined) { render(slot, hit, dep); return; }
-            whenVisible(card, () => {
-                if (Date.now() < disabledUntil) { slot.remove(); return; }
-                load(req).then((data) => render(slot, data, dep));
-            });
+            mount(slot, req, dep, card);
         } catch (e) {
             /* never break the departure list */
         }
+    }
+
+    // journey detail (Linienverlauf) of a departure: box right above `anchor`
+    function attachDetail(anchor, dep, station) {
+        try {
+            if (!anchor || !anchor.parentNode) return;
+            const old = anchor.parentNode.querySelector(':scope > .fm-detail');
+            if (old) old.remove();
+            if (!dep || !TRAIN_TYPES.has(dep.type) || !dep.trainCat || !dep.trainNum || dep.cancelled) return;
+            if (Date.now() < disabledUntil) return;
+            const eva = dep.fromEva || evaOf(station || { id: dep.station_id });
+            if (!eva) return;
+            const req = requestOf(dep, eva);
+            if (!usable(req)) return;
+            const slot = document.createElement('div');
+            slot.className = 'fm-slot fm-detail';
+            anchor.parentNode.insertBefore(slot, anchor);
+            mount(slot, req, dep, slot.parentNode);
+        } catch (e) { /* optional */ }
+    }
+
+    // Verbindungssuche: one transit leg (needs trainCat, trainNum, fromEva, from.plannedIso)
+    function mountLeg(slot, leg) {
+        try {
+            if (!slot || !leg || !TRAIN_TYPES.has(leg.type) || !leg.trainCat || !leg.trainNum || !leg.fromEva || leg.cancelled) { if (slot) slot.remove(); return; }
+            if (Date.now() < disabledUntil) { slot.remove(); return; }
+            const at = leg.from && leg.from.plannedIso ? new Date(leg.from.plannedIso) : null;
+            if (!at || isNaN(at)) { slot.remove(); return; }
+            const req = requestAt({ eva: leg.fromEva, trainCat: leg.trainCat, trainNum: leg.trainNum, at });
+            if (!usable(req)) { slot.remove(); return; }
+            slot.classList.add('fm-slot');
+            mount(slot, req, { trainCat: leg.trainCat, occupancy: leg.occupancy }, slot.parentNode);
+        } catch (e) { /* optional */ }
     }
 
     // Selbsttest: ?fmtest=1 an die Adresse hängen -> zeigt, ob dieses Gerät bahn.de direkt fragen darf
@@ -375,5 +432,5 @@
     }
     if (/[?&]fmtest=1/.test(location.search)) setTimeout(selfTest, 2500);
 
-    window.MVBFormation = { attach, selfTest };
+    window.MVBFormation = { attach, attachDetail, mountLeg, selfTest };
 })();

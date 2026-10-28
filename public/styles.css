@@ -9174,3 +9174,8 @@ body.settings-open { overflow: hidden; }
 .fm-chip.o2 b i:nth-child(-n+2) { background: #d4a017; }
 .fm-chip.o3 b i, .fm-chip.o4 b i { background: #e5484d; }
 @media (prefers-reduced-motion: reduce) { .fm { animation: none; } }
+.fm-leg, .fm-detail { align-self: stretch; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.fm-leg.ready { margin: 8px 0 2px; }
+.fm-detail.ready { margin: 0 0 12px; }
+.fm-scroll { max-width: 100%; box-sizing: border-box; }
+.fm-scroll.overflow.at-end { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000); mask-image: linear-gradient(90deg, transparent, #000 28px, #000); }

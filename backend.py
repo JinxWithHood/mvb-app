@@ -59,6 +59,15 @@ def patched_parse_leg(self, journey, common, departure, arrival, date, jny_type=
         leg.direction = (journey or {}).get('dirTxt') or None
     except Exception:
         pass
+    # train category/number (Wagenreihung)
+    try:
+        prodL = (common or {}).get('prodL') or []
+        px = (journey or {}).get('prodX')
+        ctx = (prodL[px] if isinstance(px, int) and px < len(prodL) else {}).get('prodCtx') or {}
+        leg.train_cat = (ctx.get('catOut') or ctx.get('catOutS') or '').strip() or None
+        leg.train_num = str(ctx.get('num') or '').strip() or None
+    except Exception:
+        pass
     return leg
 
 BaseParseLegHelper.parse_leg = patched_parse_leg
@@ -4366,6 +4375,21 @@ def _train_fields_inner(line_type, line_name, cat, num, occ):
     return out
 
 
+def _leg_train_fields(line_type, line_name, cat=None, num=None, from_id=None, occ=None):
+    """Connection legs: like _train_fields plus the EVA number of the boarding station."""
+    try:
+        out = _train_fields(line_type, line_name, cat, num, occ)
+        eva = formation.eva_from_station_id(from_id) if out.get('trainNum') else None
+        if not eva:
+            out.pop('trainCat', None)
+            out.pop('trainNum', None)
+        else:
+            out['fromEva'] = eva
+        return out
+    except Exception:
+        return {}
+
+
 def _db_occupancy(e):
     occ = {}
     for a in e.get('auslastungsmeldungen') or []:
@@ -4588,6 +4612,8 @@ def _db_connection(v):
             'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
             'notes': notes, 'attrs': dbweb.attributes_of(vm),
             'cancelled': bool(s.get('originCancelled') or s.get('destinationCancelled') or dbweb.is_cancelled_text(notes)),
+            **_leg_train_fields(st['type'], st['line'], *formation.ident_from_text(vm.get('langText'), vm.get('mittelText'), vm.get('name')),
+                                s.get('abfahrtsOrtExtId') or first.get('extId') or first.get('id'), _db_occupancy(s)),
         })
     price = v.get('angebotsPreis') or {}
     return _finish_connection({
@@ -4918,6 +4944,8 @@ def _nasa_connections(origin_id, dest_id, when, modes, max_changes, min_change):
                 'to': _point(arr_p, arr_r, d_name, getattr(leg, 'arrivalPlatform', None)),
                 'stops': stops, 'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
                 'notes': [], 'attrs': [], 'cancelled': bool(getattr(leg, 'cancelled', False)),
+                **_leg_train_fields(ltype, line_name, getattr(leg, 'train_cat', None), getattr(leg, 'train_num', None),
+                                    getattr(getattr(leg, 'origin', None), 'id', None)),
             })
         c = _finish_connection({'id': f'nasa-{len(out)}', 'source': 'nasa', 'legs': legs, 'price': None,
                                 'durationMin': int(j.duration.total_seconds() / 60) if j.duration else 0})
@@ -5212,6 +5240,7 @@ def _tr_connection(it):
             'from': _tr_point(lg.get('from'), 'dep', rt), 'to': _tr_point(lg.get('to'), 'arr', rt),
             'stops': stops, 'durationMin': round((lg.get('duration') or 0) / 60),
             'notes': [], 'attrs': attrs, 'cancelled': bool(lg.get('cancelled')),
+            **_leg_train_fields(st['type'], st['line'], *_tr_ident(lg), (lg.get('from') or {}).get('stopId')),
         })
     return _finish_connection({'id': it.get('id', '')[:40], 'source': 'tr', 'legs': legs, 'price': None,
                                'durationMin': round((it.get('duration') or 0) / 60)})

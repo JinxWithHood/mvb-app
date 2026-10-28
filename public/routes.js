@@ -397,6 +397,11 @@
             if (isOpen) expanded.add(c.key); else expanded.delete(c.key);
         });
         wireDetails(el, c);
+        if (window.MVBFormation) {
+            el.querySelectorAll('.fm-leg').forEach((slot) => {
+                try { window.MVBFormation.mountLeg(slot, c.legs[Number(slot.dataset.leg)]); } catch (e) { slot.remove(); }
+            });
+        }
         return el;
     }
 
@@ -528,6 +533,7 @@
                 <ol class="tl-stops" hidden>${stops.map(st => `<li${st.cancelled ? ' class="cancelled"' : ''}><span class="ls-time">${esc(st.rt || st.planned || '')}</span><span class="ls-name">${esc(st.name)}</span>${st.delay > 0 ? `<span class="ls-delay">+${st.delay}</span>` : ''}</li>`).join('')}</ol>` : ''}
                 ${noteHtml}
                 ${attrs}
+                ${l.trainCat && l.trainNum && l.fromEva ? `<div class="fm-leg" data-leg="${i}"></div>` : ''}
                 ${l.journeyId ? `<button type="button" class="tl-line-btn" data-leg="${i}"><svg class="ico" aria-hidden="true"><use href="#i-route"/></svg>Ganzer Linienverlauf</button>` : ''}
             </div>
         </div>`;
@@ -589,6 +595,13 @@
     // ------------------------------------------------------------------
     // Actions
     // ------------------------------------------------------------------
+    function dayOffsetOf(iso) {
+        if (!iso) return 0;
+        const d = new Date(iso.slice(0, 10) + 'T00:00:00');
+        const t = new Date(); t.setHours(0, 0, 0, 0);
+        return isNaN(d) ? 0 : Math.round((d - t) / 86400000);
+    }
+
     function legDeps(c) {
         const transit = c.legs.map((l, i) => ({ l, i })).filter(x => x.l.kind === 'transit' && x.l.journeyId);
         const deps = transit.map(({ l, i }) => ({
@@ -599,6 +612,8 @@
             operator: l.operator, station_name: l.from.name, boardStop: l.from.name, alightStop: l.to.name,
             date: (l.from.plannedIso || '').slice(0, 10), matchMvb: (l.src === 'db' || l.src === 'tr') && !!l.mvb,
             _legIndex: i,
+            trainCat: l.trainCat, trainNum: l.trainNum, fromEva: l.fromEva, occupancy: l.occupancy,
+            day_offset: dayOffsetOf(l.from.plannedIso),
         }));
         deps.forEach((d, k) => { d.tripLegs = deps; d.tripLegIndex = k; d.tripConn = c; });
         return deps;

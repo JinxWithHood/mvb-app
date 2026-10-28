@@ -2054,6 +2054,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else els.remind.innerHTML = '';
         }
         renderLegSwitch(els.route, {});
+        if (window.MVBFormation) { try { window.MVBFormation.attachDetail(els.route, {}, null); } catch (e) { /* clears an old box */ } }
         const draw = (animate) => {
             const fresh = ctx.getFresh ? ctx.getFresh() : conn;
             renderTripTimeline(fresh, ctx, els.route, els.msgs, animate);
@@ -2090,6 +2091,7 @@ document.addEventListener('DOMContentLoaded', () => {
         detailsSubtitle.textContent = `Richtung ${dep.direction}`;
         if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('detailsRemind'), dep, dep.station_name || (currentStation && currentStation.name));
         renderLegSwitch(detailsRoute, dep);
+        if (window.MVBFormation) { try { window.MVBFormation.attachDetail(detailsRoute, dep, currentStation); } catch (e) { /* optional */ } }
 
         const luminance = getLuminance(dep.lineColor);
         detailsLineBadge.textContent = cleanLineName;
@@ -2154,6 +2156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalDirection.textContent = `Richtung ${dep.direction}`;
         if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('modalRemind'), dep, dep.station_name || (currentStation && currentStation.name));
         renderLegSwitch(journeyRoute, dep);
+        if (window.MVBFormation) { try { window.MVBFormation.attachDetail(journeyRoute, dep, currentStation); } catch (e) { /* optional */ } }
 
         const luminance = getLuminance(dep.lineColor);
         modalLineBadge.textContent = cleanLineName;
