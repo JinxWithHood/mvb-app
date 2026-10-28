@@ -104,6 +104,12 @@
         if (!cars.length) return null;
         let direction = null;
         if (listed.length > 1) direction = listed[0].start > listed[listed.length - 1].start ? 'right' : 'left';
+        // draw the platform like the station signs: section A on the left
+        const secs = (pf.sectors || []).filter((x) => x && x.name && num(x.start) != null).sort((x, y) => num(x.start) - num(y.start));
+        if (secs.length > 1 && String(secs[0].name) > String(secs[secs.length - 1].name)) {
+            cars.forEach((c) => { const a = c.start; c.start = Math.round((100 - c.end) * 100) / 100; c.end = Math.round((100 - a) * 100) / 100; });
+            direction = direction === 'left' ? 'right' : direction === 'right' ? 'left' : direction;
+        }
         cars.sort((x, y) => x.start - y.start);
         [...new Set(cars.map((c) => c.group))].forEach((gi) => {
             const gc = cars.filter((c) => c.group === gi);

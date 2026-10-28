@@ -4366,7 +4366,7 @@ def _train_fields_inner(line_type, line_name, cat, num, occ):
     cat = (cat or '').strip().upper() or None
     num = str(num or '').strip()
     out = {}
-    if cat and num.isdigit():
+    if cat in formation.TRAIN_CATS and num.isdigit():
         out['trainCat'], out['trainNum'] = cat, num
     if occ:
         out['occupancy'] = occ

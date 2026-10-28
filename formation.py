@@ -297,6 +297,12 @@ def normalize(raw):
     direction = None
     if len(listed) > 1:
         direction = 'right' if listed[0]['start'] > listed[-1]['start'] else 'left'
+    # draw the platform like the station signs: section A on the left
+    if len(sectors) > 1 and sectors[0]['name'] > sectors[-1]['name']:
+        for x in sectors + cars:
+            x['start'], x['end'] = round(100 - x['end'], 2), round(100 - x['start'], 2)
+        sectors.sort(key=lambda x: x['start'])
+        direction = {'left': 'right', 'right': 'left'}.get(direction)
     cars.sort(key=lambda c: c['start'])
     # end cars of a multiple unit get a nose facing outwards
     for gi in {c['group'] for c in cars}:
