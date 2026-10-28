@@ -352,5 +352,28 @@
         }
     }
 
-    window.MVBFormation = { attach };
+    // Selbsttest: ?fmtest=1 an die Adresse hängen -> zeigt, ob dieses Gerät bahn.de direkt fragen darf
+    async function selfTest() {
+        const say = (msg, kind) => { if (window.MVBApp && window.MVBApp.showToast) window.MVBApp.showToast(msg, kind || 'info'); else console.log(msg); };
+        try {
+            const d = await fetch(`${apiBase()}/formation/diag`).then((r) => r.json());
+            const t = (d.trains || []).find((x) => x.trainCat && x.trainNum);
+            if (!t) { say('Wagenreihung-Test: gerade kein Zug am Magdeburg Hbf gefunden.'); return; }
+            const req = requestOf({ trainCat: t.trainCat, trainNum: t.trainNum, time: t.time, day_offset: 0 }, '8010224');
+            let res;
+            try {
+                const r = await fetch(req.direct, { credentials: 'omit', mode: 'cors' });
+                res = `HTTP ${r.status}`;
+                if (r.ok) { const n = normalize(await r.json()); res += n ? ` · ${n.cars.length} Wagen erkannt ✅` : ' · keine Wagen'; }
+            } catch (e) {
+                res = 'vom Browser blockiert (CORS) ❌';
+            }
+            say(`Wagenreihung-Test (${t.trainCat} ${t.trainNum}): ${res}`, res.includes('✅') ? 'success' : 'info');
+        } catch (e) {
+            say('Wagenreihung-Test fehlgeschlagen: Server nicht erreichbar.');
+        }
+    }
+    if (/[?&]fmtest=1/.test(location.search)) setTimeout(selfTest, 2500);
+
+    window.MVBFormation = { attach, selfTest };
 })();
