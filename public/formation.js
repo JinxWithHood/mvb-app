@@ -19,6 +19,21 @@
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const pad = (n) => String(n).padStart(2, '0');
 
+    // Is a Wagenreihung source online (home helper / server)? Without one: no strips, no tabs.
+    const STATUS_TTL = 45 * 1000;
+    let status = { at: 0, online: false, promise: null };
+    function sourceOnline() {
+        if (status.promise) return status.promise;
+        if (status.at && Date.now() - status.at < STATUS_TTL) return Promise.resolve(status.online);
+        status.promise = fetch(`${apiBase()}/formation/status`, { cache: 'no-store' })
+            .then((r) => (r.ok ? r.json() : {}))
+            .then((d) => !!(d && d.online))
+            .catch(() => false)
+            .then((ok) => { status = { at: Date.now(), online: ok, promise: null }; return ok; });
+        return status.promise;
+    }
+    function markOffline() { status = { at: Date.now(), online: false, promise: null }; }
+
     function evaOf(station) {
         const id = String((station && station.id) || '');
         let m = id.match(/@L=(\d{7})@/);
@@ -154,6 +169,7 @@
                 .then((data) => {
                     if (data && data.blocked) {
                         serverBlocked = true;
+                        markOffline();
                         return fetchDirect(job.direct);
                     }
                     return data && data.available ? data : null;
@@ -400,7 +416,7 @@
             const slot = document.createElement('div');
             slot.className = 'fm-slot';
             card.appendChild(slot);
-            mount(slot, req, dep, card);
+            sourceOnline().then((ok) => { if (ok) mount(slot, req, dep, card); else slot.remove(); });
         } catch (e) {
             /* never break the departure list */
         }
@@ -430,8 +446,20 @@
             anchor.parentNode.querySelectorAll(':scope > .fm-detail, :scope > .fm-tabs, :scope > .fm-panel').forEach((el) => el.remove());
             anchor.style.display = '';
             details.delete(anchor);
+            const gen = String((Number(anchor.dataset.fmGen) || 0) + 1);
+            anchor.dataset.fmGen = gen;
             // trams and buses never get the tab
             if (!dep || !TRAIN_TYPES.has(dep.type) || !dep.trainCat || !dep.trainNum || dep.cancelled) return;
+            // tabs only while a source (home helper) is online
+            sourceOnline().then((ok) => {
+                if (ok && anchor.dataset.fmGen === gen && anchor.parentNode) buildDetail(anchor, dep, station);
+            });
+        } catch (e) { /* optional */ }
+    }
+
+    function buildDetail(anchor, dep, station) {
+        try {
+            const early = details.get(anchor);
             const boardEva = String(dep.fromEva || evaOf(station || { id: dep.station_id }) || '');
             const st = { dep, boardEva, stops: [], sel: null, active: false, anchor, ticket: 0 };
             // until the trip is loaded: only the boarding stop
@@ -452,6 +480,7 @@
             anchor.parentNode.insertBefore(panel, anchor);
             st.tabs = tabs; st.panel = panel;
             details.set(anchor, st);
+            if (early && early.pendingStops) setStops(anchor, early.pendingStops);
 
             tabs.addEventListener('click', (e) => {
                 const b = e.target.closest('button');
@@ -474,8 +503,9 @@
     // called after every /api/journey load with its stops (they carry the EVA number)
     function setStops(anchor, stops) {
         try {
-            const st = anchor && details.get(anchor);
-            if (!st || !Array.isArray(stops)) return;
+            if (!anchor || !Array.isArray(stops)) return;
+            const st = details.get(anchor);
+            if (!st || !st.panel) { details.set(anchor, { pendingStops: stops }); return; }
             const list = stops.filter((s) => s && s.eva && !s.cancelled && (s.depTime || s.time || s.arrTime))
                 .map((s) => ({ name: s.name, eva: String(s.eva), time: s.depTime || s.time || s.arrTime,
                     arrTime: s.arrTime, depTime: s.depTime, day_offset: s.day_offset || 0, passed: !!s.passed, platform: s.platform }));
@@ -561,7 +591,10 @@
             const req = requestAt({ eva: leg.fromEva, trainCat: leg.trainCat, trainNum: leg.trainNum, at });
             if (!usable(req)) { slot.remove(); return; }
             slot.classList.add('fm-slot');
-            mount(slot, req, { trainCat: leg.trainCat, occupancy: leg.occupancy }, slot.parentNode);
+            sourceOnline().then((ok) => {
+                if (ok) mount(slot, req, { trainCat: leg.trainCat, occupancy: leg.occupancy }, slot.parentNode);
+                else slot.remove();
+            });
         } catch (e) { /* optional */ }
     }
 

@@ -4533,6 +4533,23 @@ def api_formation_agent_result():
     return jsonify({'ok': True})
 
 
+@app.route('/api/formation/status')
+def api_formation_status():
+    """Is any Wagenreihung source usable right now? (home helper online, or this server reaches bahn.de)"""
+    if _agent_online():
+        online, via = True, 'helper'
+    else:
+        try:
+            online = formation.reachable()
+        except Exception as ex:
+            print(f"[WARN] formation status: {ex}")
+            online = False
+        via = 'server' if online else None
+    resp = jsonify({'online': online, 'via': via})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @app.route('/api/formation')
 def api_formation():
     """Wagenreihung for one train departure: eva, cat, num, date (YYYY-MM-DD), time (HH:MM, planned)."""

@@ -201,6 +201,36 @@ def fetch(eva, cat, num, dep_local):
     return None
 
 
+_probe = {'at': 0.0, 'ok': False}
+PROBE_TTL = 10 * 60
+
+
+def reachable():
+    """Can this server itself get formations from bahn.de (relay or direct)? Cached ~10 min."""
+    now = time.time()
+    if all_blocked():
+        return False
+    if now - _probe['at'] < PROBE_TTL:
+        return _probe['ok']
+    ok = False
+    params = params_for('8010224', 'ICE', '1', datetime.datetime.now(TZ).replace(tzinfo=None, second=0, microsecond=0))
+    for name, url, headers in sources():
+        if _blocked.get(name, 0) > now:
+            continue
+        try:
+            r = _session.get(url, params=params, headers=headers, timeout=6)
+        except requests.RequestException:
+            continue
+        if r.status_code in (401, 403, 452):
+            _blocked[name] = time.time() + BLOCK_PAUSE
+            continue
+        ok = r.status_code < 500
+        if ok:
+            break
+    _probe.update(at=time.time(), ok=ok)
+    return ok
+
+
 # ---------------------------------------------------------------------------
 # Normalize
 # ---------------------------------------------------------------------------
