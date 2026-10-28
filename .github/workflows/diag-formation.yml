@@ -6,42 +6,54 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Watch bahnhof.de network traffic
+      - name: Probe Regio Guide
         shell: bash {0}
         run: |
-          npm i playwright@1.47.2 > inst.txt 2>&1; npx playwright install --with-deps chromium >> inst.txt 2>&1
-          cat > w.js <<'JS'
-          const { chromium } = require('playwright');
-          (async () => {
-            const b = await chromium.launch();
-            const p = await b.newPage({ locale: 'de-DE' });
-            const log = []; const flush = () => require("fs").writeFileSync("log.txt", log.join("\n")); setInterval(flush, 2000);
-            p.on('response', async r => {
-              const u = r.url(); const ct = r.headers()['content-type'] || '';
-              if (/\.(js|css|woff2?|png|svg|jpg|webp|ico)(\?|$)/.test(u) || u.includes('/_next/static')) return;
-              let body = '';
-              try { if (/json|text\/x-component|text\/plain/.test(ct)) body = (await r.text()).slice(0, 300).replace(/\s+/g, ' '); } catch (e) {}
-              log.push(`${r.request().method()} ${r.status()} ${u.slice(0, 220)} [${ct.slice(0, 30)}] hdr:${JSON.stringify(Object.keys(r.request().headers()).filter(h => /^(rsc|next-|x-)/i.test(h)))} ${body}`);
-            });
-            await p.goto('https://www.bahnhof.de/magdeburg-hbf/abfahrt', { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await p.waitForTimeout(12000);
-            const links = await p.$$eval('a[href*="wagenreihung"]', as => as.map(a => a.getAttribute('href')));
-            log.push('LINKS ' + links.length + ' ' + links.slice(0, 3).join(' '));
-            if (links[0]) {
-              log.push('---- open coach sequence');
-              await p.goto('https://www.bahnhof.de' + links[0], { waitUntil: 'domcontentloaded', timeout: 60000 });
-              await p.waitForTimeout(10000);
-              const html = await p.content();
-              const i = html.indexOf('Wagen');
-              log.push('TEXT ' + (await p.innerText('main').catch(() => '')).slice(0, 600).replace(/\s+/g, ' '));
-            }
-            require('fs').writeFileSync('log.txt', log.join('\n'));
-            await b.close();
-          })().catch(e => { require('fs').appendFileSync('log.txt', 'ERR ' + e.message.slice(0, 300)); });
-          JS
-          node w.js > run.txt 2>&1 || { echo "node failed: $(tail -c 1500 run.txt) / $(tail -c 800 inst.txt)" > log.txt; }
-          grep -v "google\|analytics\|sentry\|consent\|usercentrics\|matomo\|etracker" log.txt > l2.txt
-          for i in 0 1 2 3 4 5; do part=$(tail -c +$((i*3800+1)) l2.txt | head -c 3800 | tr '\n' '~'); [ -z "$part" ] && break; echo "::notice title=n$i::$part"; done
+          cat > p.py <<'PY'
+          import json, urllib.request, urllib.parse, datetime
+          B = 'https://regio-guide.de/@prd/zupo-travel-information/api/public/ri/'
+          def get(path, q=None):
+              url = B + path + ('?' + urllib.parse.urlencode(q) if q else '')
+              r = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36', 'Accept': 'application/json'})
+              try:
+                  with urllib.request.urlopen(r, timeout=25) as x: return x.status, x.read().decode('utf-8', 'replace')
+              except urllib.error.HTTPError as e: return e.code, e.read()[:200].decode('utf-8', 'replace')
+              except Exception as e: return 'ERR', str(e)[:100]
+          def keys(o, pre='', acc=None):
+              acc = acc if acc is not None else set()
+              if isinstance(o, dict):
+                  for k, v in o.items(): acc.add(pre + k); keys(v, pre + k + '.', acc)
+              elif isinstance(o, list) and o: keys(o[0], pre + '[].', acc)
+              return acc
+          now = datetime.datetime.utcnow()
+          q = {'modeOfTransport': 'HIGH_SPEED_TRAIN,REGIONAL_TRAIN,CITY_TRAIN,INTER_REGIONAL_TRAIN', 'timeStart': now.strftime('%Y-%m-%dT%H:%M:%S.000Z'), 'timeEnd': (now + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S.000Z'), 'expandTimeFrame': 'TIME_END', 'occupancy': 'true'}
+          out = {}
+          st, b = get('board/departure/8010224', q)
+          out['board'] = [st, len(b)]
+          try: bj = json.loads(b)
+          except Exception: bj = None; out['boardText'] = b[:200]
+          if bj:
+              out['boardKeys'] = sorted(k for k in keys(bj) if len(k) < 70)[:80]
+              items = bj.get('items') or bj.get('departures') or (bj if isinstance(bj, list) else [])
+              jid = None
+              for it in items:
+                  s = json.dumps(it)
+                  if 'HIGH_SPEED' in s or 'ICE' in s or 'REGIONAL' in s:
+                      jid = it.get('journeyID') or it.get('journeyId') or (it.get('train') or {}).get('journeyId') or (it.get('departure') or {}).get('journeyID')
+                      if jid: out['sample'] = s[:400]; break
+              out['jid'] = jid
+              if jid:
+                  st2, b2 = get('journey/' + urllib.parse.quote(jid, safe=''))
+                  out['journey'] = [st2, len(b2)]
+                  try:
+                      jj = json.loads(b2); ks = sorted(keys(jj))
+                      out['journeyKeys'] = [k for k in ks if len(k) < 80][:120]
+                  except Exception: out['journeyText'] = b2[:200]
+                  for path in ['formation/' + jid, 'journey/' + jid + '/formation', 'vehicle-sequence/' + jid, 'journey/' + jid + '/vehicle-sequence']:
+                      s3, b3 = get(urllib.parse.quote(path, safe='/'))
+                      out['try ' + path[:30]] = [s3, b3[:100]]
+          print(json.dumps(out))
+          PY
+          python3 p.py > out.txt 2>&1
+          f=$(cat out.txt | tr -d '\n')
+          for i in 0 1 2 3 4 5 6 7; do part="${f:$((i*3800)):3800}"; [ -z "$part" ] && break; echo "::notice title=part$i::$part"; done
