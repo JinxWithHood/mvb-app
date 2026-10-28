@@ -6,54 +6,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe Regio Guide
+      - name: Probe third-party coach sequence sources
         shell: bash {0}
         run: |
-          cat > p.py <<'PY'
-          import json, urllib.request, urllib.parse, datetime
-          B = 'https://regio-guide.de/@prd/zupo-travel-information/api/public/ri/'
-          def get(path, q=None):
-              url = B + path + ('?' + urllib.parse.urlencode(q) if q else '')
-              r = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36', 'Accept': 'application/json'})
-              try:
-                  with urllib.request.urlopen(r, timeout=25) as x: return x.status, x.read().decode('utf-8', 'replace')
-              except urllib.error.HTTPError as e: return e.code, e.read()[:200].decode('utf-8', 'replace')
-              except Exception as e: return 'ERR', str(e)[:100]
-          def keys(o, pre='', acc=None):
-              acc = acc if acc is not None else set()
-              if isinstance(o, dict):
-                  for k, v in o.items(): acc.add(pre + k); keys(v, pre + k + '.', acc)
-              elif isinstance(o, list) and o: keys(o[0], pre + '[].', acc)
-              return acc
-          now = datetime.datetime.utcnow()
-          q = {'modeOfTransport': 'HIGH_SPEED_TRAIN,REGIONAL_TRAIN,CITY_TRAIN,INTER_REGIONAL_TRAIN', 'timeStart': now.strftime('%Y-%m-%dT%H:%M:%S.000Z'), 'timeEnd': (now + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S.000Z'), 'expandTimeFrame': 'TIME_END', 'occupancy': 'true'}
-          out = {}
-          st, b = get('board/departure/8010224', q)
-          out['board'] = [st, len(b)]
-          try: bj = json.loads(b)
-          except Exception: bj = None; out['boardText'] = b[:200]
-          if bj:
-              out['boardKeys'] = sorted(k for k in keys(bj) if len(k) < 70)[:80]
-              items = bj.get('items') or bj.get('departures') or (bj if isinstance(bj, list) else [])
-              jid = None
-              for it in items:
-                  s = json.dumps(it)
-                  if 'HIGH_SPEED' in s or 'ICE' in s or 'REGIONAL' in s:
-                      jid = it.get('journeyID') or it.get('journeyId') or (it.get('train') or {}).get('journeyId') or (it.get('departure') or {}).get('journeyID')
-                      if jid: out['sample'] = s[:400]; break
-              out['jid'] = jid
-              if jid:
-                  st2, b2 = get('journey/' + urllib.parse.quote(jid, safe=''))
-                  out['journey'] = [st2, len(b2)]
-                  try:
-                      jj = json.loads(b2); ks = sorted(keys(jj))
-                      out['journeyKeys'] = [k for k in ks if len(k) < 80][:120]
-                  except Exception: out['journeyText'] = b2[:200]
-                  for path in ['formation/' + jid, 'journey/' + jid + '/formation', 'vehicle-sequence/' + jid, 'journey/' + jid + '/vehicle-sequence']:
-                      s3, b3 = get(urllib.parse.quote(path, safe='/'))
-                      out['try ' + path[:30]] = [s3, b3[:100]]
-          print(json.dumps(out))
-          PY
-          python3 p.py > out.txt 2>&1
-          f=$(cat out.txt | tr -d '\n')
-          for i in 0 1 2 3 4 5 6 7; do part="${f:$((i*3800)):3800}"; [ -z "$part" ] && break; echo "::notice title=part$i::$part"; done
+          D=$(curl -s -m 90 https://mvb-app.onrender.com/api/formation/diag)
+          N=$(echo "$D" | python3 -c "import sys,json; t=[x for x in json.load(sys.stdin).get('trains',[]) if x.get('trainCat') in ('ICE','IC','EC')] or [{}]; print(t[0].get('trainNum',''), t[0].get('trainCat',''), t[0].get('time',''))")
+          set -- $N; NUM=$1; CAT=$2; T=$3
+          ISO="2026-10-28T${T}:00+01:00"; ENC=$(python3 -c "import urllib.parse;print(urllib.parse.quote('$ISO'))")
+          r="train $CAT $NUM $T"
+          for u in \
+            "https://bahn.expert/api/coachSequence/v4/wagen/$NUM?evaNumber=8010224&departure=$ENC&category=$CAT" \
+            "https://bahn.expert/api/coachSequence/v4/sequence?trainNumber=$NUM&evaNumber=8010224&departure=$ENC&category=$CAT" \
+            "https://bahn.expert/rpc/coachSequence.sequence?input=%7B%22trainNumber%22%3A$NUM%2C%22evaNumber%22%3A%228010224%22%2C%22departure%22%3A%22$ENC%22%2C%22category%22%3A%22$CAT%22%7D" \
+            "https://bahn.expert/" ; do
+            c=$(curl -s -o /tmp/b -w '%{http_code}' -m 25 -A 'Mozilla/5.0' "$u" || true); r="$r || ${u:0:70} => $c $(head -c 160 /tmp/b | tr -d '\n\"')"
+          done
+          echo "::notice title=probe::$r"
