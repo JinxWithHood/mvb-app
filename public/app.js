@@ -2125,6 +2125,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         detailsLineBadge.classList.toggle('dark-text', lum > 180);
                     }
                     renderStopsTimelineHTML(data, detailsRoute, detailsMessages, !isQuiet);
+                    if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(detailsRoute, data.stops); } catch (e) { /* optional */ } }
                     markTripSegment(detailsRoute, dep);
                     updateDepartureCardDelay(targetId, data);
                     renderOperator(data.operator, detailsOperator);
@@ -2197,6 +2198,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     modalLineBadge.classList.toggle('dark-text', lum > 180);
                 }
                 renderStopsTimelineHTML(data, journeyRoute, journeyMessages, !isQuiet);
+                if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(journeyRoute, data.stops); } catch (e) { /* optional */ } }
                 markTripSegment(journeyRoute, dep);
                 updateDepartureCardDelay(mobTargetId, data);
                 renderOperator(data.operator, modalOperator);

@@ -407,46 +407,148 @@
     }
 
     // journey detail (Linienverlauf) of a departure: box right above `anchor`
+    // ------------------------------------------------------------------
+    // Linienverlauf: tabs "Echtzeit | Gleisbelegung" (trains + S-Bahn only),
+    // Gleisbelegung can be picked for every stop of the trip
+    // ------------------------------------------------------------------
+    const details = new WeakMap();      // anchor -> state
+
+    function stopRequest(dep, s) {
+        if (!s || !s.eva || s.cancelled) return null;
+        const t = s.depTime || s.time || s.arrTime;
+        const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+        if (!m) return null;
+        const at = new Date();
+        at.setDate(at.getDate() + (s.day_offset || 0));
+        at.setHours(Number(m[1]), Number(m[2]), 0, 0);
+        return requestAt({ eva: String(s.eva), trainCat: dep.trainCat, trainNum: dep.trainNum, at });
+    }
+
     function attachDetail(anchor, dep, station) {
         try {
             if (!anchor || !anchor.parentNode) return;
-            anchor.parentNode.querySelectorAll(':scope > .fm-detail, :scope > .fm-tabs').forEach((el) => el.remove());
+            anchor.parentNode.querySelectorAll(':scope > .fm-detail, :scope > .fm-tabs, :scope > .fm-panel').forEach((el) => el.remove());
             anchor.style.display = '';
+            details.delete(anchor);
+            // trams and buses never get the tab
             if (!dep || !TRAIN_TYPES.has(dep.type) || !dep.trainCat || !dep.trainNum || dep.cancelled) return;
-            if (Date.now() < disabledUntil) return;
-            const eva = dep.fromEva || evaOf(station || { id: dep.station_id });
-            if (!eva) return;
-            const req = requestOf(dep, eva);
-            if (!usable(req)) return;
-            const slot = document.createElement('div');
-            slot.className = 'fm-slot fm-detail fm-off';
-            anchor.parentNode.insertBefore(slot, anchor);
-            // once a formation exists: switch "Echtzeit" (stops) <-> "Gleisbelegung" (formation)
-            mount(slot, req, dep, slot.parentNode, () => {
-                if (!slot.isConnected || slot.previousElementSibling && slot.previousElementSibling.classList.contains('fm-tabs')) return;
-                const tabs = document.createElement('div');
-                tabs.className = 'fm-tabs';
-                tabs.setAttribute('role', 'tablist');
-                tabs.innerHTML = '<button type="button" role="tab" aria-selected="true" data-v="live">Echtzeit</button>'
-                    + '<button type="button" role="tab" aria-selected="false" data-v="track">Gleisbelegung</button>';
-                slot.parentNode.insertBefore(tabs, slot);
-                tabs.addEventListener('click', (e) => {
-                    const b = e.target.closest('button');
-                    if (!b) return;
-                    const track = b.dataset.v === 'track';
-                    tabs.querySelectorAll('button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-                    slot.classList.toggle('fm-off', !track);
-                    anchor.style.display = track ? 'none' : '';
-                    if (track) {
-                        const sc = slot.querySelector('.fm-scroll');
-                        if (sc && sc.scrollWidth > sc.clientWidth + 4) {
-                            sc.classList.add('overflow');
-                            if (slot.querySelector('.fm-lead:last-child')) sc.scrollLeft = sc.scrollWidth;
-                        }
-                    }
-                });
+            const boardEva = String(dep.fromEva || evaOf(station || { id: dep.station_id }) || '');
+            const st = { dep, boardEva, stops: [], sel: null, active: false, anchor, ticket: 0 };
+            // until the trip is loaded: only the boarding stop
+            if (boardEva && dep.time) {
+                st.stops = [{ name: dep.station_name || (station && station.name) || 'Abfahrt', eva: boardEva,
+                    time: dep.time, day_offset: dep.day_offset || 0, board: true }];
+            }
+
+            const tabs = document.createElement('div');
+            tabs.className = 'fm-tabs';
+            tabs.setAttribute('role', 'tablist');
+            tabs.innerHTML = '<button type="button" role="tab" aria-selected="true" data-v="live">Echtzeit</button>'
+                + '<button type="button" role="tab" aria-selected="false" data-v="track">Gleisbelegung</button>';
+            const panel = document.createElement('div');
+            panel.className = 'fm-panel fm-off';
+            panel.innerHTML = '<div class="fm-stops" role="listbox" aria-label="Halt wählen"></div><div class="fm-view"></div>';
+            anchor.parentNode.insertBefore(tabs, anchor);
+            anchor.parentNode.insertBefore(panel, anchor);
+            st.tabs = tabs; st.panel = panel;
+            details.set(anchor, st);
+
+            tabs.addEventListener('click', (e) => {
+                const b = e.target.closest('button');
+                if (!b) return;
+                const track = b.dataset.v === 'track';
+                tabs.querySelectorAll('button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+                st.active = track;
+                panel.classList.toggle('fm-off', !track);
+                anchor.style.display = track ? 'none' : '';
+                if (track) { drawStops(st); select(st, st.sel); }
             });
+            panel.querySelector('.fm-stops').addEventListener('click', (e) => {
+                const c = e.target.closest('[data-eva]');
+                if (c) select(st, c.dataset.key);
+            });
+            panel.addEventListener('click', (e) => { if (e.target.closest('.fm-scroll, .fm-stops')) e.stopPropagation(); });
         } catch (e) { /* optional */ }
+    }
+
+    // called after every /api/journey load with its stops (they carry the EVA number)
+    function setStops(anchor, stops) {
+        try {
+            const st = anchor && details.get(anchor);
+            if (!st || !Array.isArray(stops)) return;
+            const list = stops.filter((s) => s && s.eva && !s.cancelled && (s.depTime || s.time || s.arrTime))
+                .map((s) => ({ name: s.name, eva: String(s.eva), time: s.depTime || s.time || s.arrTime,
+                    arrTime: s.arrTime, depTime: s.depTime, day_offset: s.day_offset || 0, passed: !!s.passed, platform: s.platform }));
+            if (!list.length) return;
+            const sig = (l) => l.map((s) => s.eva + '@' + s.time + '+' + s.day_offset + (s.passed ? 'p' : '')).join(',');
+            if (sig(list) === sig(st.stops)) return;
+            st.stops = list;
+            if (st.active) drawStops(st);
+        } catch (e) { /* optional */ }
+    }
+
+    function keyOf(s) { return `${s.eva}@${s.day_offset}@${s.time}`; }
+
+    function defaultStop(st) {
+        const l = st.stops;
+        return l.find((s) => s.eva === st.boardEva) || l.find((s) => !s.passed) || l[0] || null;
+    }
+
+    function drawStops(st) {
+        const box = st.panel.querySelector('.fm-stops');
+        if (!st.sel || !st.stops.some((s) => keyOf(s) === st.sel)) {
+            const d = defaultStop(st);
+            st.sel = d ? keyOf(d) : null;
+        }
+        box.innerHTML = st.stops.map((s) => {
+            const k = keyOf(s);
+            const on = k === st.sel;
+            return `<button type="button" role="option" class="fm-stop${s.passed ? ' passed' : ''}${s.eva === st.boardEva ? ' board' : ''}" aria-selected="${on}" data-eva="${esc(s.eva)}" data-key="${esc(k)}">`
+                + `<strong>${esc(s.name || '')}</strong><small>${esc(s.time || '')}${s.platform ? ' · Gl. ' + esc(s.platform) : ''}</small></button>`;
+        }).join('');
+        const on = box.querySelector('[aria-selected="true"]');
+        if (on) requestAnimationFrame(() => { box.scrollLeft = Math.max(0, on.offsetLeft - box.clientWidth / 2 + on.offsetWidth / 2); });
+    }
+
+    function select(st, key) {
+        if (!st.stops.length) { message(st, 'Für diese Fahrt liefert die DB keine Wagenreihung.'); return; }
+        const s = st.stops.find((x) => keyOf(x) === key) || defaultStop(st);
+        if (!s) return;
+        st.sel = keyOf(s);
+        st.panel.querySelectorAll('.fm-stop').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.key === st.sel)));
+        const req = stopRequest(st.dep, s);
+        const ticket = ++st.ticket;
+        if (!req) { message(st, 'Für diesen Halt liefert die DB keine Wagenreihung.'); return; }
+        const mins = (req.at - Date.now()) / 60000;
+        if (mins < -30) { message(st, 'Hier ist der Zug schon durch – such dir einen späteren Halt aus.'); return; }
+        if (mins > 6 * 60) { message(st, 'Die Wagenreihung gibt’s erst ein paar Stunden vor Abfahrt.'); return; }
+        // occupancy from the departure board belongs to the boarding stop only
+        const info = { trainCat: st.dep.trainCat, occupancy: s.eva === st.boardEva ? st.dep.occupancy : null };
+        const show = (data) => {
+            if (ticket !== st.ticket || !st.panel.isConnected) return;
+            if (!data) {
+                message(st, Date.now() < disabledUntil
+                    ? 'Die Wagenreihung ist gerade nicht erreichbar – gleich nochmal probieren.'
+                    : 'Für diesen Halt liefert die DB keine Wagenreihung.');
+                return;
+            }
+            const view = st.panel.querySelector('.fm-view');
+            view.innerHTML = '';
+            const slot = document.createElement('div');
+            slot.className = 'fm-slot fm-detail';
+            view.appendChild(slot);
+            render(slot, data, info);
+        };
+        const hit = cached(req.key);
+        if (hit !== undefined) { show(hit); return; }
+        if (Date.now() < disabledUntil) { show(null); return; }
+        message(st, 'Wagenreihung wird geladen …', true);
+        load(req).then(show);
+    }
+
+    function message(st, text, busy) {
+        const view = st.panel.querySelector('.fm-view');
+        view.innerHTML = `<p class="fm-msg${busy ? ' busy' : ''}">${esc(text)}</p>`;
     }
 
     // Verbindungssuche: one transit leg (needs trainCat, trainNum, fromEva, from.plannedIso)
@@ -486,5 +588,5 @@
     }
     if (/[?&]fmtest=1/.test(location.search)) setTimeout(selfTest, 2500);
 
-    window.MVBFormation = { attach, attachDetail, mountLeg, selfTest };
+    window.MVBFormation = { attach, attachDetail, setStops, mountLeg, selfTest };
 })();

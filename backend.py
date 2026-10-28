@@ -1604,6 +1604,7 @@ def get_journey():
         for s in stops_raw:
             loc_idx = s.get('locX', 0)
             name = locL[loc_idx].get('name') if loc_idx < len(locL) else "Unknown"
+            stop_eva = formation.eva_from_station_id(locL[loc_idx].get('extId')) if loc_idx < len(locL) else None
             idx = s.get('idx', 0)
 
             # Time fields
@@ -1737,6 +1738,7 @@ def get_journey():
                 "lineColor": stop_color,
                 "isRequestStop": is_req_stop,
                 "requestStopNote": stop_req_note,
+                "eva": stop_eva,
             })
 
         # Mark the vehicle's current stop
@@ -4820,6 +4822,7 @@ def _db_trip(jid, line_hint=None):
                       'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
                       'platform': h.get('ezGleis') or h.get('gleis') or '',
                       'cancelled': bool(h.get('cancelled')), 'lat': None, 'lon': None,
+                      'eva': formation.eva_from_station_id(h.get('extId') or h.get('id')),
                       'day_offset': (p.date() - now.date()).days if p else 0})
     zug = (raw.get('zugName') or '').strip()
     kat = ((halte[0].get('kategorie') if halte else '') or zug.split(' ')[0]).upper()
@@ -4860,6 +4863,7 @@ def _trip_to_journey_response(trip, station_name, line_hint, direction_hint, col
             'depTime': s.get('dep') if i < last else None, 'depDelay': s.get('depDelay') if i < last else None,
             'estimatedTime': (s.get('arrRt') if use_arr else s.get('depRt')) if (d not in (None, 0)) else None,
             'isVehicleHere': False, 'isRequestStop': False, 'requestStopNote': None,
+            'eva': s.get('eva'),
         })
         if s['passed']:
             vehicle_pos = i
@@ -5412,6 +5416,7 @@ def _tr_trip(jid, line_hint=None):
                       'dep': _hm(d_p), 'depRt': _hm(d_r) if d_r else None, 'depDelay': dbweb.delay_of(d_p, d_r),
                       'platform': pl.get('track') or pl.get('scheduledTrack') or '',
                       'cancelled': bool(pl.get('cancelled')), 'lat': pl.get('lat'), 'lon': pl.get('lon'),
+                      'eva': formation.eva_from_station_id(pl.get('stopId')),
                       'day_offset': (p.date() - now.date()).days if p else 0})
     st = _tr_style(leg, *(x.get('name') for x in places[:2]))
     return {'id': jid, 'line': line_hint or st['line'], 'short': st['label'], 'type': st['type'], 'color': st['color'],
