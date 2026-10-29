@@ -14,6 +14,13 @@ Werbefreie Fahrplan-App für Bus & Bahn in Magdeburg – als Website **und** ins
 
 ```
 backend.py            Flask-Server (API + liefert die Website aus)
+news_api.py           Störungsmeldungen (Verkehrsmelder) + MVB-News
+formation_api.py      Wagenreihung: API-Routen + Helfer daheim
+formation.py          Wagenreihung: bahn.de abfragen und aufbereiten
+dbweb.py, transitous.py  Weitere Fahrplan-Quellen (bahn.de, Transitous)
+admin.py              Admin-Bereich
+relay/                Wagenreihungs-Helfer für zu Hause
+tests/                Automatische Tests (laufen bei jedem Push, siehe tests/README.md)
 requirements.txt      Python-Pakete
 render.yaml           Einstellungen für Render.com
 Server starten.bat    Startet die App lokal (Doppelklick) → http://127.0.0.1:5000
@@ -23,6 +30,8 @@ public/               Alles, was der Browser bekommt
   push.js             Push-Benachrichtigungen & Abfahrts-Wecker
   pwa.js              App-Installation
   jinx-fx.js          🤫
+  offline.js          Offline-Modus (letzte Abfahrten/Verläufe auf dem Gerät)
+  formation.js        Wagenreihung / Gleisbelegung
   sw.js, manifest.json  App-/Offline-Funktionen
   assets/             Icons, Bilder, Betreiber-Logos (assets/logos)
 cache/                Laufzeit-Daten des Servers (wird automatisch erzeugt, nicht im Repo)
