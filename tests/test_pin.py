@@ -113,12 +113,27 @@ class MessageTests(unittest.TestCase):
         p = a_pin()
         m = pin.message(p, pin.view(p, trip(), NOW + 30), False, image_url='https://x/card.png')
         self.assertEqual(m['title'], 'RE 1 → Berlin Hbf · +3 Min')
-        self.assertIn('Jetzt Genthin · nächster Halt Brandenburg Hbf', m['body'])
+        self.assertEqual(m['body'], f"Nächster Halt: Brandenburg Hbf · {hm(19)}")
         self.assertEqual(m['tag'], 'pin')
         self.assertEqual(m['image'], 'https://x/card.png')
         m = pin.message(p, pin.view(p, trip(), NOW + 40 * 60), True)
         self.assertIn('aussteigen', m['body'])
         self.assertTrue(m['alert'])
+
+
+class NameTests(unittest.TestCase):
+    def test_short_names(self):
+        self.assertEqual(pin.short_name('Schkeuditz, S-Bahnhof (Bus)', 'Schkeuditz'), 'S-Bahnhof')
+        self.assertEqual(pin.short_name('Schkeuditz, Rathausplatz', 'Schkeuditz'), 'Rathausplatz')
+        self.assertEqual(pin.short_name('Leipzig, Hbf', 'Schkeuditz'), 'Leipzig, Hbf')
+        self.assertEqual(pin.short_name('Magdeburg Hbf', None), 'Magdeburg Hbf')
+
+    def test_view_drops_town_when_whole_ride_is_in_it(self):
+        t = {'stops': [{'name': f'Schkeuditz, {n}', 'time': hm(m), 'rt': None, 'delay': None}
+                       for n, m in (('Gewerbegebiet', -4), ('S-Bahnhof (Bus)', 2), ('Rathausplatz', 4))]}
+        p = a_pin(board='Schkeuditz, S-Bahnhof (Bus)', exit='Schkeuditz, Rathausplatz', planned=int((NOW + 120) * 1000))
+        v = pin.view(p, t, NOW)
+        self.assertEqual((v['prev']['name'], v['cur']['name'], v['next']['name']), ('Gewerbegebiet', 'S-Bahnhof', 'Rathausplatz'))
 
 
 class CardTests(unittest.TestCase):

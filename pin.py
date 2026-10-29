@@ -119,8 +119,20 @@ def locate(pin, stops):
     return b, e
 
 
-def _stop(s, ep, planned_ep=None):
-    return {'name': s.get('name') or '', 'time': s.get('rt') or s.get('time') or '',
+_SUFFIX = re.compile(r'\s*\((bus|tram|tram/bus|str|s-bahn|s|u|bahnhof|bhf)\)\s*$', re.I)
+
+
+def short_name(name, city=None):
+    """'Schkeuditz, S-Bahnhof (Bus)' -> 'S-Bahnhof' when the ride stays in Schkeuditz."""
+    n = (name or '').strip()
+    if city and n.lower().startswith(city.lower() + ', ') and len(n) > len(city) + 3:
+        n = n[len(city) + 2:]
+    n = _SUFFIX.sub('', n).strip()
+    return n or (name or '')
+
+
+def _stop(s, ep, planned_ep=None, city=None):
+    return {'name': short_name(s.get('name'), city), 'time': s.get('rt') or s.get('time') or '',
             'planned': s.get('time') or '', 'epoch': ep, 'plannedEpoch': planned_ep}
 
 
@@ -174,16 +186,21 @@ def view(pin, trip, now):
         pct = min(1.0, max(0.0, (seg - b + f) / (e - b)))
 
     ref_delay = stops[b] if phase == 'before' else stops[min(max(passed + 1, b), e)]
+    # 'Schkeuditz, …' everywhere -> drop the town (it is the same for the whole ride)
+    bname = stops[b].get('name') or ''
+    city = bname.split(', ')[0] if ', ' in bname else None
+    if city and not all((stops[i].get('name') or '').startswith(city + ', ') for i in (b, e)):
+        city = None
     delay = ref_delay.get('delay')
     ride = stops[b:e + 1]
     return {
         'phase': phase,
         'label': label,
-        'prev': _stop(stops[prev_i], real[prev_i]) if prev_i >= 0 else None,
-        'cur': _stop(stops[cur], real[cur]),
-        'next': _stop(stops[next_i], real[next_i]) if next_i < n else None,
-        'board': _stop(stops[b], real[b], plan[b]),
-        'exit': _stop(stops[e], real[e], plan[e]),
+        'prev': _stop(stops[prev_i], real[prev_i], city=city) if prev_i >= 0 else None,
+        'cur': _stop(stops[cur], real[cur], city=city),
+        'next': _stop(stops[next_i], real[next_i], city=city) if next_i < n else None,
+        'board': _stop(stops[b], real[b], plan[b], city=city),
+        'exit': _stop(stops[e], real[e], plan[e], city=city),
         'stopsTotal': e - b,
         'stopsLeft': max(0, e - max(passed, b)) if phase != 'before' else e - b,
         'ticks': [round((i - b) / (e - b), 4) for i in range(b, e + 1)],
@@ -253,25 +270,22 @@ def message(pin, v, alert, image_url=None, icon_url=None, open_url='/?tab=home&p
     line = v.get('line') or 'Deine Fahrt'
     head = f"{line} → {v['direction']}" if v.get('direction') else line
     title = f"{head} · {delay_text(v)}"
-    ex, bo = v['exit'], v['board']
-    exit_pf = _platform(v, 'exit')
+    ex = v['exit']
+    # one short line – the picture shows the rest
     if v.get('cancelled'):
-        first = 'Die Fahrt fällt (teilweise) aus – schau in den Linienverlauf.'
-        tail = f"Ausstieg {ex['name']} {ex['time']}"
+        body = 'Fahrt fällt aus – tippen für Details'
     elif v['phase'] == 'before':
         m = v['minsToDep']
         pf = _platform(v, 'board')
-        first = (f"Einsteigen in {m} Min" if m > 0 else 'Fährt jetzt ab') + f" · {bo['name']} ab {bo['time']}" + (f" · Gl. {pf}" if pf else '')
-        tail = f"Ausstieg {ex['name']} um {ex['time']}"
+        body = (f"Abfahrt in {m} Min" if m > 0 else 'Fährt jetzt ab') + (f" · Gleis {pf}" if pf else '')
     elif v['phase'] == 'exit':
-        first = f"Nächster Halt: {ex['name']} – bitte aussteigen"
-        tail = f"Ankunft {ex['time']}" + (f" · Gl. {exit_pf}" if exit_pf else '')
+        pf = _platform(v, 'exit')
+        body = f"Jetzt aussteigen: {ex['name']}" + (f" · Gleis {pf}" if pf else '')
     else:
         nxt = v.get('next')
-        first = f"Jetzt {v['cur']['name']}" + (f" · nächster Halt {nxt['name']} {nxt['time']}" if nxt else '')
-        tail = f"Ausstieg {ex['name']} {ex['time']}" + (f" · Gl. {exit_pf}" if exit_pf else '') + f" · noch {v['minsLeft']} Min"
+        body = f"Nächster Halt: {nxt['name']} · {nxt['time']}" if nxt else f"Ankunft {ex['time']}"
     msg = {
-        'kind': 'pin', 'tag': 'pin', 'title': title, 'body': f"{first}\n{tail}",
+        'kind': 'pin', 'tag': 'pin', 'title': title, 'body': body,
         'url': open_url, 'alert': bool(alert), 'pinId': pin.get('id'),
     }
     if image_url:
@@ -369,86 +383,63 @@ def _mix(a, b, t):
 
 
 def card_png(v, scale=2.5):
-    """PNG of the expanded notification: train + delay, previous / now / next stop,
-    the Wagenreihung (when known) and the whole ride as a bar."""
+    """PNG of the expanded notification (the title already says train + delay):
+    previous / now / next stop as a line diagram, the Wagenreihung (when known) and the ride as a bar.
+    2.4:1 with wide side margins – Android crops big pictures (2:1 on phones, wider on tablets)."""
     from PIL import Image, ImageDraw
     S = scale
-    W, H = int(400 * S), int(200 * S)
+    W, H = int(480 * S), int(200 * S)
     img = Image.new('RGB', (W, H), BG)
     d = ImageDraw.Draw(img)
-    P = 16 * S
+    P = 46 * S                                   # safe area left/right
     fm = v.get('formation')
     phase = v.get('phase')
-
-    # ---- header: line badge + direction | delay + arrival
-    color = _rgb(v.get('color'))
-    f_badge = _font('Bold', 14 * S)
-    line = v.get('line') or ''
-    bw = d.textlength(line, font=f_badge) + 18 * S
-    d.rounded_rectangle([P, P, P + bw, P + 28 * S], radius=8 * S, fill=color)
-    d.text((P + bw / 2, P + 14 * S), line, font=f_badge, fill=_on(color), anchor='mm')
-
-    dtext = delay_text(v)
-    f_delay = _font('Bold', 12 * S)
-    dw = d.textlength(dtext, font=f_delay) + 20 * S
-    late = v.get('cancelled') or (v.get('delay') or 0) > 0
-    dfill = RED if v.get('cancelled') else (AMBER if late else (24, 92, 60))
-    dfg = (255, 255, 255) if v.get('cancelled') else ((26, 18, 6) if late else (200, 250, 222))
-    d.rounded_rectangle([W - P - dw, P, W - P, P + 22 * S], radius=11 * S, fill=dfill)
-    d.text((W - P - dw / 2, P + 11 * S), dtext, font=f_delay, fill=dfg, anchor='mm')
     ex = v.get('exit') or {}
-    d.text((W - P, P + 29 * S), f"an {ex.get('time', '')}", font=_font('Medium', 9.5 * S), fill=MUTED, anchor='rm')
 
-    left = P + bw + 10 * S
-    room = (W - P - dw - 10 * S) - left
-    d.text((left, P + 6 * S), 'Richtung', font=_font('Medium', 8.5 * S), fill=MUTED, anchor='lm')
-    d.text((left, P + 19 * S), _fit(d, v.get('direction') or '', _font('Bold', 15 * S), room),
-           font=_font('Bold', 15 * S), fill=TEXT, anchor='lm')
-
-    # ---- previous / now / next as a little line diagram
-    top = P + (44 if fm else 52) * S
-    cols = [(W * 1 / 6, 'Vorher', v.get('prev'), 'prev'), (W / 2, v.get('label') or 'Jetzt', v.get('cur'), 'cur'),
-            (W * 5 / 6, 'Nächster', v.get('next'), 'next')]
-    ly = top + 18 * S
-    d.line([cols[0][0], ly, cols[1][0], ly], fill=_mix(GREEN, BG, 0.25), width=int(3 * S))
+    # ---- previous / now / next
+    pill_y, ly = (22 * S, 48 * S) if fm else (34 * S, 64 * S)
+    cw = (W - 2 * P) / 3
+    cols = [(P + cw * 0.5, v.get('prev'), 'prev'), (P + cw * 1.5, v.get('cur'), 'cur'), (P + cw * 2.5, v.get('next'), 'next')]
+    d.line([cols[0][0], ly, cols[1][0], ly], fill=_mix(GREEN, BG, 0.3), width=int(3.5 * S))
     x = cols[1][0]
-    while x < cols[2][0]:                                   # dashed: still to come
-        d.line([x, ly, min(x + 6 * S, cols[2][0]), ly], fill=LINE, width=int(3 * S))
-        x += 11 * S
-    colw = W / 3 - 12 * S
-    big = not fm
-    for cx, lab, st, kind in cols:
+    while x < cols[2][0]:                        # dashed: still to come
+        d.line([x, ly, min(x + 7 * S, cols[2][0]), ly], fill=LINE, width=int(3.5 * S))
+        x += 12 * S
+    hot = phase == 'exit'
+    lab = (v.get('label') or 'Jetzt').upper()
+    f_pill = _font('Bold', 8.5 * S)
+    pw = d.textlength(lab, font=f_pill) + 16 * S
+    cx = cols[1][0]
+    d.rounded_rectangle([cx - pw / 2, pill_y - 8 * S, cx + pw / 2, pill_y + 8 * S], radius=8 * S,
+                        fill=GREEN if hot else _mix(GREEN, BG, 0.8))
+    d.text((cx, pill_y), lab, font=f_pill, fill=BG if hot else GREEN, anchor='mm')
+    for cx, st, kind in cols:
         cur = kind == 'cur'
-        hot = cur and phase == 'exit'
-        d.text((cx, top + 4 * S), lab.upper(), font=_font('Bold', 8 * S), fill=GREEN if cur else MUTED, anchor='mm')
         if cur:
-            d.ellipse([cx - 13 * S, ly - 13 * S, cx + 13 * S, ly + 13 * S], fill=_mix(GREEN, BG, 0.78))
-            d.ellipse([cx - 8 * S, ly - 8 * S, cx + 8 * S, ly + 8 * S], fill=GREEN)
-            d.ellipse([cx - 3 * S, ly - 3 * S, cx + 3 * S, ly + 3 * S], fill=BG)
+            d.ellipse([cx - 14 * S, ly - 14 * S, cx + 14 * S, ly + 14 * S], fill=_mix(GREEN, BG, 0.78))
+            d.ellipse([cx - 9 * S, ly - 9 * S, cx + 9 * S, ly + 9 * S], fill=GREEN)
+            d.ellipse([cx - 3.5 * S, ly - 3.5 * S, cx + 3.5 * S, ly + 3.5 * S], fill=BG)
         elif kind == 'prev' and st:
-            d.ellipse([cx - 5 * S, ly - 5 * S, cx + 5 * S, ly + 5 * S], fill=_mix(GREEN, BG, 0.25))
+            d.ellipse([cx - 5.5 * S, ly - 5.5 * S, cx + 5.5 * S, ly + 5.5 * S], fill=_mix(GREEN, BG, 0.3))
         elif st:
-            d.ellipse([cx - 6 * S, ly - 6 * S, cx + 6 * S, ly + 6 * S], fill=BG, outline=MUTED, width=int(2.2 * S))
-        name = st['name'] if st else '–'
-        f_name = _font('Bold', (14 if big else 12.5) * S) if cur else _font('SemiBold', (11.5 if big else 10.5) * S)
-        ny = ly + (20 if big else 18) * S
-        d.text((cx, ny), _fit(d, name, f_name, colw), font=f_name,
+            d.ellipse([cx - 6.5 * S, ly - 6.5 * S, cx + 6.5 * S, ly + 6.5 * S], fill=BG, outline=MUTED, width=int(2.4 * S))
+        if not st:
+            continue
+        f_name = _font('Bold', 15 * S) if cur else _font('SemiBold', 12 * S)
+        ny = ly + 27 * S
+        d.text((cx, ny), _fit(d, st['name'], f_name, cw - 6 * S), font=f_name,
                fill=(GREEN if hot else TEXT) if cur else ((206, 218, 212) if kind == 'next' else MUTED), anchor='mm')
-        if st and st.get('time'):
-            d.text((cx, ny + (15 if big else 13) * S), st['time'], font=_font('Medium', (10.5 if big else 9.5) * S),
-                   fill=(207, 218, 212) if cur else MUTED, anchor='mm')
+        if st.get('time'):
+            d.text((cx, ny + 17 * S), st['time'], font=_font('Medium', 11 * S),
+                   fill=(214, 225, 219) if cur else MUTED, anchor='mm')
 
-    # ---- Wagenreihung (or how many stops are left)
+    # ---- Wagenreihung
     if fm:
-        _draw_formation(d, fm, P, top + 60 * S, W - P, S)
-    elif phase in ('before', 'ride') and v.get('stopsLeft'):
-        n = v['stopsLeft']
-        txt = f"Noch {n} {'Halt' if n == 1 else 'Halte'} bis {ex.get('name', '')}"
-        d.text((W / 2, top + 88 * S), _fit(d, txt, _font('Medium', 10 * S), W - 2 * P), font=_font('Medium', 10 * S), fill=MUTED, anchor='mm')
+        _draw_formation(d, fm, P, 108 * S, W - P, S)
 
     # ---- the ride as a bar
-    by = H - P - 18 * S
-    x0, x1 = P + 6 * S, W - P - 6 * S
+    by = 166 * S if fm else 158 * S
+    x0, x1 = P, W - P
     pct = float(v.get('pct') or 0)
     px = x0 + (x1 - x0) * pct
     d.rounded_rectangle([x0, by - 2.5 * S, x1, by + 2.5 * S], radius=2.5 * S, fill=LINE)
@@ -464,19 +455,16 @@ def card_png(v, scale=2.5):
     mx = min(max(px, x0 + mw / 2), x1 - mw / 2)
     d.rounded_rectangle([mx - mw / 2, by - mh / 2, mx + mw / 2, by + mh / 2], radius=7 * S, fill=GREEN, outline=BG, width=int(2 * S))
     _train_glyph(d, mx, by, S)
-    f_small = _font('Medium', 9 * S)
-    ly2 = by + 14 * S
-    third = (x1 - x0) / 3
-    d.text((x0 - 4 * S, ly2), _fit(d, (v.get('board') or {}).get('name'), f_small, third), font=f_small, fill=MUTED, anchor='lm')
-    d.text((x1 + 4 * S, ly2), _fit(d, ex.get('name'), f_small, third), font=f_small, fill=MUTED, anchor='rm')
     if phase == 'before':
         m = v.get('minsToDep') or 0
         mid = f'Abfahrt in {m} Min' if m > 0 else 'Fährt ab'
     elif phase == 'exit':
-        mid = 'Gleich da – aussteigen!'
+        mid = 'Gleich aussteigen'
     else:
-        mid = f"noch {v.get('minsLeft', 0)} Min"
-    d.text(((x0 + x1) / 2, ly2), mid, font=_font('Bold', 9.5 * S), fill=GREEN if phase == 'exit' else TEXT, anchor='mm')
+        mid = f"noch {v.get('minsLeft', 0)} Min bis {ex.get('name', '')}"
+    f_mid = _font('SemiBold', 10 * S)
+    d.text(((x0 + x1) / 2, by + 18 * S), _fit(d, mid, f_mid, x1 - x0), font=f_mid,
+           fill=GREEN if hot else (190, 204, 197), anchor='mm')
 
     out = io.BytesIO()
     img.save(out, 'PNG', optimize=True)
