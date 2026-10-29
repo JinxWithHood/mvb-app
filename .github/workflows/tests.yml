@@ -1,0 +1,44 @@
+# Automatische Tests: laufen bei jedem Push und zeigen auf GitHub ein ✔ oder ✘ am Commit.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Unit- und API-Tests
+        run: python -m unittest discover -s tests -v
+
+  browser:
+    name: Browser (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-save --no-package-lock playwright@1.48.2
+      - run: npx playwright install --with-deps chromium
+      - name: Klick-Test (Abfahrten, Gleisbelegung, Offline-Modus)
+        run: node tests/e2e/smoke.js
+        env:
+          PYTHON: python
