@@ -9203,3 +9203,10 @@ body.settings-open { overflow: hidden; }
 .fm-msg.busy::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: fmspin .8s linear infinite; }
 @keyframes fmspin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .fm-msg.busy::before { animation: none; } }
+
+/* ===== 38. Offline-Modus ===== */
+.offline-note { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(var(--warning-rgb), .45); background: rgba(var(--warning-rgb), .12); color: var(--text-primary); }
+.offline-note .offline-ico { font-size: 22px; line-height: 1; }
+.offline-note strong { display: block; font-size: 14px; }
+.offline-note small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
+.board-live-dot.stale, #app.theme-jinx .board-live-dot.stale { background: var(--warning) !important; box-shadow: none !important; animation: none !important; }

@@ -1349,13 +1349,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const nameEl = document.getElementById('boardStationName');
         const metaEl = document.getElementById('boardMeta');
         if (nameEl) nameEl.textContent = shortStationName(currentStation.name);
+        const dot = document.querySelector('.board-live-dot');
+        if (dot) dot.classList.toggle('stale', !!departuresStaleAt);
         if (metaEl) {
             const now = new Date();
             const t = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const count = departuresCache.length;
             const mode = isNowModeActive ? 'Live' : `ab ${depTime.value || '--:--'} Uhr`;
-            metaEl.textContent = `${count} ${count === 1 ? 'Abfahrt' : 'Abfahrten'} · ${mode} · aktualisiert ${t}`;
+            metaEl.textContent = departuresStaleAt && window.MVBOffline
+                ? `${count} ${count === 1 ? 'Abfahrt' : 'Abfahrten'} · Offline · Stand ${window.MVBOffline.stamp(departuresStaleAt)}`
+                : `${count} ${count === 1 ? 'Abfahrt' : 'Abfahrten'} · ${mode} · aktualisiert ${t}`;
         }
+    }
+
+    // Offline-Modus: last saved departures of the current stop (see offline.js)
+    let departuresStaleAt = 0;
+    function showOfflineDepartures(dateVal, timeVal) {
+        if (!window.MVBOffline || !currentStation) return false;
+        const hit = window.MVBOffline.load('dep', currentStation.id);
+        if (!hit || !Array.isArray(hit.data)) return false;
+        const m = hit.meta || {};
+        // "now" view: any saved list works (past trips drop out); fixed time: only the same query
+        if (!(isNowModeActive ? m.now : (!m.now && m.date === dateVal && m.time === timeVal))) return false;
+        departuresCache = hit.data;
+        departuresStaleAt = hit.at;
+        renderDepartures(departuresCache, true);
+        updateBoardHeader();
+        return true;
+    }
+
+    // Offline-Modus: last saved Linienverlauf of this trip
+    function showOfflineJourney(id, dep, route, messages) {
+        if (!window.MVBOffline || !id) return false;
+        const hit = window.MVBOffline.load('jr', id);
+        if (!hit || !hit.data || !Array.isArray(hit.data.stops)) return false;
+        renderStopsTimelineHTML(hit.data, route, messages, false);
+        try { markTripSegment(route, dep); } catch (e) { /* optional */ }
+        if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(route, hit.data.stops); } catch (e) { /* optional */ } }
+        window.MVBOffline.banner(messages, hit.at, 'Gespeicherter Verlauf');
+        return true;
     }
 
     async function fetchDepartures(silent = false) {
@@ -1382,9 +1414,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error((data && data.error) || 'Abfahrten nicht verfügbar');
             }
             departuresCache = data;
+            departuresStaleAt = 0;
             departuresLoading.hidden = true;
             renderDepartures(departuresCache, silent);
             updateBoardHeader();
+            if (window.MVBOffline) {
+                window.MVBOffline.save('dep', currentStation.id, data, { now: isNowModeActive, date: dateVal, time: timeVal, duration: durationVal, name: currentStation.name });
+            }
             
             if (isInitialLoad) {
                 isInitialLoad = false;
@@ -1393,6 +1429,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error('Abfahrtsladefehler:', err);
             departuresLoading.hidden = true;
+            // Funkloch / server asleep: show the last saved departures of this stop
+            if (showOfflineDepartures(dateVal, timeVal)) {
+                if (isInitialLoad) { isInitialLoad = false; hideLoadingScreen(); }
+                return;
+            }
             if (!silent) {
                 departuresList.innerHTML = `<div class="error-card glass-card board-error"><strong>Die Abfahrten konnten nicht geladen werden.</strong><button type="button" class="routes-retry">Nochmal versuchen</button></div>`;
                 const rb = departuresList.querySelector('.routes-retry');
@@ -1439,6 +1480,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         departuresList.innerHTML = '';
+        if (departuresStaleAt && window.MVBOffline) window.MVBOffline.banner(departuresList, departuresStaleAt, 'Gespeicherte Abfahrten');
 
         if (!filtered.length) {
             departuresEmpty.hidden = false;
@@ -2125,6 +2167,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         detailsLineBadge.classList.toggle('dark-text', lum > 180);
                     }
                     renderStopsTimelineHTML(data, detailsRoute, detailsMessages, !isQuiet);
+                    if (window.MVBOffline) { window.MVBOffline.clearBanner(detailsMessages); if (data && Array.isArray(data.stops)) window.MVBOffline.save('jr', targetId, data); }
                     if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(detailsRoute, data.stops); } catch (e) { /* optional */ } }
                     markTripSegment(detailsRoute, dep);
                     updateDepartureCardDelay(targetId, data);
@@ -2132,6 +2175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (err) {
                 console.error('Desktop-Details Ladefehler:', err);
+                if (showOfflineJourney(targetId, dep, detailsRoute, detailsMessages)) return;
                 if (!isQuiet) {
                     detailsRoute.innerHTML = '<div class="error-card glass-card">Verlauf konnte nicht geladen werden.</div>';
                 }
@@ -2198,6 +2242,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     modalLineBadge.classList.toggle('dark-text', lum > 180);
                 }
                 renderStopsTimelineHTML(data, journeyRoute, journeyMessages, !isQuiet);
+                if (window.MVBOffline) { window.MVBOffline.clearBanner(journeyMessages); if (data && Array.isArray(data.stops)) window.MVBOffline.save('jr', mobTargetId, data); }
                 if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(journeyRoute, data.stops); } catch (e) { /* optional */ } }
                 markTripSegment(journeyRoute, dep);
                 updateDepartureCardDelay(mobTargetId, data);
@@ -2205,6 +2250,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 console.error('Mobile-Modal Ladefehler:', err);
                 journeyLoading.hidden = true;
+                if (!journeyModal.hidden && showOfflineJourney(mobTargetId, dep, journeyRoute, journeyMessages)) return;
                 if (!isQuiet) {
                     journeyRoute.innerHTML = '<div class="error-card glass-card">Verlauf konnte nicht geladen werden.</div>';
                 }
@@ -3717,7 +3763,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function bootCheck() {
-        if (navigator.onLine === false) { showBootError(true); return; }
+        const saved = () => window.MVBOffline && currentStation && window.MVBOffline.load('dep', currentStation.id);
+        if (navigator.onLine === false) { if (saved()) { hideLoadingScreen(); return; } showBootError(true); return; }
         const tries = [20000, 20000, 25000];
         for (let i = 0; i < tries.length; i++) {
             const ctrl = 'AbortController' in window ? new AbortController() : null;
@@ -3728,12 +3775,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (res.ok || res.status === 404) { hideLoadingScreen(); return; }
             } catch (e) {
                 if (timer) clearTimeout(timer);
-                if (navigator.onLine === false) { showBootError(true); return; }
+                if (navigator.onLine === false) { if (saved()) { hideLoadingScreen(); return; } showBootError(true); return; }
             }
             if (i < tries.length - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
         }
+        if (saved()) { hideLoadingScreen(); return; }
         showBootError(false);
     }
+    // back online: refresh the stale list right away
+    window.addEventListener('online', () => {
+        if (departuresStaleAt && currentPlanView !== 'routes') fetchDepartures(true);
+    });
+    window.addEventListener('offline', () => {
+        if (departuresCache.length && !departuresStaleAt && window.MVBOffline) {
+            departuresStaleAt = Date.now();
+            window.MVBOffline.banner(departuresList, departuresStaleAt, 'Zuletzt geladene Abfahrten');
+            updateBoardHeader();
+        }
+    });
     window.__mvbBootGate = true;
     bootCheck();
 });
