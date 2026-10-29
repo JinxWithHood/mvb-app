@@ -383,8 +383,7 @@ def _mix(a, b, t):
 
 
 def card_png(v, scale=2.5):
-    """PNG of the expanded notification (the title already says train + delay):
-    previous / now / next stop as a line diagram, the Wagenreihung (when known) and the ride as a bar.
+    """PNG of the expanded notification: line + delay, previous / now / next stop as a line diagram, the Wagenreihung (when known) and the ride as a bar.
     2.4:1 with wide side margins – Android crops big pictures (2:1 on phones, wider on tablets)."""
     from PIL import Image, ImageDraw
     S = scale
@@ -396,8 +395,24 @@ def card_png(v, scale=2.5):
     phase = v.get('phase')
     ex = v.get('exit') or {}
 
+    # ---- top row: line badge | stop label | delay
+    pill_y, ly = (24 * S, 60 * S) if fm else (32 * S, 74 * S)
+    color = _rgb(v.get('color'))
+    f_badge = _font('Bold', 12.5 * S)
+    line = v.get('line') or ''
+    bw = d.textlength(line, font=f_badge) + 16 * S
+    d.rounded_rectangle([P, pill_y - 11 * S, P + bw, pill_y + 11 * S], radius=7 * S, fill=color)
+    d.text((P + bw / 2, pill_y), line, font=f_badge, fill=_on(color), anchor='mm')
+    dtext = delay_text(v)
+    f_delay = _font('Bold', 11.5 * S)
+    dw = d.textlength(dtext, font=f_delay) + 18 * S
+    late = v.get('cancelled') or (v.get('delay') or 0) > 0
+    dfill = RED if v.get('cancelled') else (AMBER if late else (24, 92, 60))
+    dfg = (255, 255, 255) if v.get('cancelled') else ((26, 18, 6) if late else (200, 250, 222))
+    d.rounded_rectangle([W - P - dw, pill_y - 10 * S, W - P, pill_y + 10 * S], radius=10 * S, fill=dfill)
+    d.text((W - P - dw / 2, pill_y), dtext, font=f_delay, fill=dfg, anchor='mm')
+
     # ---- previous / now / next
-    pill_y, ly = (22 * S, 48 * S) if fm else (34 * S, 64 * S)
     cw = (W - 2 * P) / 3
     cols = [(P + cw * 0.5, v.get('prev'), 'prev'), (P + cw * 1.5, v.get('cur'), 'cur'), (P + cw * 2.5, v.get('next'), 'next')]
     d.line([cols[0][0], ly, cols[1][0], ly], fill=_mix(GREEN, BG, 0.3), width=int(3.5 * S))
@@ -435,10 +450,10 @@ def card_png(v, scale=2.5):
 
     # ---- Wagenreihung
     if fm:
-        _draw_formation(d, fm, P, 108 * S, W - P, S)
+        _draw_formation(d, fm, P, 116 * S, W - P, S)
 
     # ---- the ride as a bar
-    by = 166 * S if fm else 158 * S
+    by = 170 * S if fm else 160 * S
     x0, x1 = P, W - P
     pct = float(v.get('pct') or 0)
     px = x0 + (x1 - x0) * pct
@@ -463,7 +478,7 @@ def card_png(v, scale=2.5):
     else:
         mid = f"noch {v.get('minsLeft', 0)} Min bis {ex.get('name', '')}"
     f_mid = _font('SemiBold', 10 * S)
-    d.text(((x0 + x1) / 2, by + 18 * S), _fit(d, mid, f_mid, x1 - x0), font=f_mid,
+    d.text(((x0 + x1) / 2, by + 17 * S), _fit(d, mid, f_mid, x1 - x0), font=f_mid,
            fill=GREEN if hot else (190, 204, 197), anchor='mm')
 
     out = io.BytesIO()
