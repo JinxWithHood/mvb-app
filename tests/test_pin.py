@@ -113,7 +113,7 @@ class MessageTests(unittest.TestCase):
         p = a_pin()
         m = pin.message(p, pin.view(p, trip(), NOW + 30), False, image_url='https://x/card.png')
         self.assertEqual(m['title'], 'RE 1 → Berlin Hbf · +3 Min')
-        self.assertIn('Burg (b Magdeburg) › Genthin › Brandenburg Hbf', m['body'])
+        self.assertIn('Jetzt Genthin · nächster Halt Brandenburg Hbf', m['body'])
         self.assertEqual(m['tag'], 'pin')
         self.assertEqual(m['image'], 'https://x/card.png')
         m = pin.message(p, pin.view(p, trip(), NOW + 40 * 60), True)
@@ -122,22 +122,40 @@ class MessageTests(unittest.TestCase):
 
 
 class CardTests(unittest.TestCase):
-    def test_token_round_trip_and_tamper(self):
+    def test_card_key_stable(self):
         v = pin.view(a_pin(), trip(), NOW + 30)
-        data, sig = pin.image_token(v, b'secret')
-        back = pin.read_token(data, sig, b'secret')
-        self.assertEqual(back['cur']['name'], 'Genthin')
-        self.assertIsNone(pin.read_token(data, sig, b'other'))
-        self.assertIsNone(pin.read_token(data[:-2] + 'xx', sig, b'secret'))
+        k1, keep = pin.card_key(v)
+        k2, _ = pin.card_key(dict(v))
+        self.assertEqual(k1, k2)
+        self.assertEqual(keep['cur']['name'], 'Genthin')
+        v2 = dict(v, delay=9)
+        self.assertNotEqual(pin.card_key(v2)[0], k1)
+
+    def test_compact_formation(self):
+        import formation
+        from helpers import ic_raw
+        fm = pin.compact_formation(formation.normalize(ic_raw()), 'board', 'Magdeburg Hbf')
+        self.assertEqual(fm['platform'], '3')
+        self.assertEqual(len(fm['cars']), 5)
+        self.assertIn(fm['direction'], ('left', 'right'))
+        self.assertIsNone(pin.compact_formation(None, 'board', 'x'))
 
     def test_png(self):
         try:
             import PIL  # noqa: F401
         except ImportError:
             self.skipTest('Pillow fehlt')
+        import formation
+        from helpers import ic_raw
+        fm = pin.compact_formation(formation.normalize(ic_raw()), 'board', 'Magdeburg Hbf')
         for t in (NOW - 40 * 60, NOW + 30, NOW + 40 * 60):
-            png = pin.card_png(pin.view(a_pin(), trip(), t))
-            self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+            for with_fm in (False, True):
+                v = pin.view(a_pin(), trip(), t)
+                if with_fm:
+                    v['formation'] = fm
+                png = pin.card_png(pin.card_key(v)[1])
+                self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+        self.assertEqual(pin.icon_png('RE 1', '#a3242c')[:4], b'\x89PNG')
 
 
 class PinApi(unittest.TestCase):
@@ -218,17 +236,36 @@ class PinApi(unittest.TestCase):
         self.assertNotIn('pin', self.b._subs()[self.key])
 
     def test_card_image_route(self):
-        v = pin.view(pin.clean(self.pin_body()), trip(), NOW)
-        data, sig = pin.image_token(v, self.b._pin_secret())
-        r = self.c.get(f'/api/pin/card.png?d={data}&s={sig}')
         try:
             import PIL  # noqa: F401
-            self.assertEqual(r.status_code, 200)
-            self.assertEqual(r.mimetype, 'image/png')
         except ImportError:
-            self.assertEqual(r.status_code, 500)
+            self.skipTest('Pillow fehlt')
+        v = pin.view(pin.clean(self.pin_body()), trip(), NOW)
+        with mock.patch.object(self.b, 'PUBLIC_URL', 'https://app.example'):
+            image, icon = self.b._pin_media(v)
+        self.assertTrue(image.startswith('https://app.example/api/pin/card/'))
+        r = self.c.get(image.replace('https://app.example', ''))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.mimetype, 'image/png')
         r.close()
-        self.assertEqual(self.c.get(f'/api/pin/card.png?d={data}&s=deadbeef').status_code, 403)
+        r = self.c.get(icon.replace('https://app.example', ''))
+        self.assertEqual(r.status_code, 200)
+        r.close()
+        self.assertEqual(self.c.get('/api/pin/card/0123456789abcdef0123.png').status_code, 404)
+        self.assertEqual(self.c.get('/api/pin/card/..%2fx.png').status_code, 404)
+
+    def test_formation_in_notification(self):
+        import formation
+        from helpers import ic_raw
+        body = dict(self.pin_body(), trainCat='IC', trainNum='2037', boardEva='8010224', exitEva='8012666')
+        with mock.patch.object(formation, 'fetch', return_value=ic_raw()):
+            r = self.post({'pin': body}).get_json()
+        fm = r['view']['formation']
+        self.assertEqual(fm['where'], 'exit')            # already riding -> where you get off
+        self.assertEqual(len(fm['cars']), 5)
+        with mock.patch.object(formation, 'fetch', side_effect=formation.Blocked('x')):
+            v = self.post({'view': True}).get_json()['view']
+        self.assertIsNone(v['formation'])                # blocked and no helper: just no Wagenreihung
 
 
 if __name__ == '__main__':

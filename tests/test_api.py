@@ -85,6 +85,17 @@ class FormationApi(Base):
             d = self.c.get(self.q()).get_json()
         self.assertTrue(d['available'])
 
+    def test_helper_long_poll_wakes_up(self):
+        import threading
+        import time as _t
+        mod = getattr(backend, '_formation_api', None) or backend
+        threading.Timer(0.3, lambda: mod._fm_enqueue('k-longpoll', {'evaNumber': '8010224'})).start()
+        t0 = _t.time()
+        r = self.c.get('/api/formation/agent/jobs?wait=5', headers={'X-Agent-Key': AGENT_KEY}).get_json()
+        self.assertLess(_t.time() - t0, 3)
+        self.assertEqual([j['key'] for j in r['jobs']], ['k-longpoll'])
+        mod._fm_jobs.pop('k-longpoll', None)
+
     def test_agent_needs_key(self):
         self.assertEqual(self.c.get('/api/formation/agent/jobs').status_code, 403)
         self.assertEqual(self.c.get('/api/formation/agent/jobs', headers={'X-Agent-Key': 'wrong'}).status_code, 403)

@@ -2,7 +2,7 @@
 // - network-first for the app shell (updates arrive immediately)
 // - cache-first for images/fonts, never caches live API data
 // - Web Push: shows notifications from the server, opens the right tab on tap
-const CACHE_NAME = 'mvb-magdeburg-cache-v9-18';
+const CACHE_NAME = 'mvb-magdeburg-cache-v9-19';
 const CORE_URLS = [
   '/',
   '/index.html',
@@ -127,7 +127,7 @@ async function showPin(data, title) {
   const alert = !!data.alert;
   const options = {
     body: data.body || '',
-    icon: '/assets/icon-192.png',
+    icon: data.icon || '/assets/icon-192.png',
     badge: '/assets/badge-72.png',
     tag: 'pin',
     renotify: alert,

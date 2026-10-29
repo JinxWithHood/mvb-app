@@ -11,12 +11,17 @@ holt sie über deinen normalen Internetanschluss bei bahn.de und schickt sie zur
 - Nur Python 3 nötig, keine Zusatzpakete.
 
 Start:  python wagenreihung_helfer.py
-Beim ersten Start fragt es nach dem Schlüssel (derselbe wie FORMATION_AGENT_KEY bei Render)
-und merkt ihn sich in helfer_schluessel.txt neben dieser Datei.
+Beim ersten Start fragt es nach dem Schlüssel (derselbe wie FORMATION_AGENT_KEY bzw.
+FORMATION_RELAY_KEY bei Render) und merkt ihn sich in helfer_schluessel.txt neben dieser Datei.
+
+Läuft auch auf einem Android-Handy (App „Termux“), siehe relay/android-einrichten.sh –
+dann funktioniert die Wagenreihung überall, wo das Handy Netz hat.
 """
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -43,7 +48,7 @@ def load_key():
         with open(KEY_FILE, encoding='utf-8') as fh:
             key = fh.read().strip()
     if not key:
-        key = input('Schlüssel (FORMATION_AGENT_KEY von Render) eingeben: ').strip()
+        key = input('Schlüssel (FORMATION_AGENT_KEY bzw. FORMATION_RELAY_KEY von Render) eingeben: ').strip()
         with open(KEY_FILE, 'w', encoding='utf-8') as fh:
             fh.write(key)
     return key
@@ -75,13 +80,25 @@ def fetch_formation(params):
                 headers={'Accept-Language': 'de-DE,de;q=0.9'}, timeout=15)
 
 
+def keep_awake():
+    """Android/Termux: stop the phone from pausing the helper in the background."""
+    if 'com.termux' in os.environ.get('PREFIX', '') and shutil.which('termux-wake-lock'):
+        try:
+            subprocess.run(['termux-wake-lock'], timeout=10)
+            print('Android: Wake-Lock aktiv (Termux läuft im Hintergrund weiter).')
+        except Exception:
+            pass
+
+
 def main():
     key = load_key()
     auth = {'X-Agent-Key': key}
+    keep_awake()
     print(f'Wagenreihungs-Helfer läuft · Server: {SERVER} · Beenden mit Strg+C')
     pause, done, warned = 3, 0, False
     while True:
-        status, data = http(f'{SERVER}/api/formation/agent/jobs', headers=auth, timeout=30)
+        # long poll: the server holds the request until a job arrives (max. 25 s) – spart Akku
+        status, data = http(f'{SERVER}/api/formation/agent/jobs?wait=25', headers=auth, timeout=45)
         if status == 403:
             print('Schlüssel falsch oder FORMATION_AGENT_KEY bei Render nicht gesetzt. '
                   f'Datei {KEY_FILE} löschen und neu starten.')
@@ -94,6 +111,7 @@ def main():
             time.sleep(10)
             continue
         warned = False
+        pause = 0.3 if data.get('wait') else 3
         if data.get('path') and data['path'] != ALLOWED_PATH:
             time.sleep(pause)
             continue

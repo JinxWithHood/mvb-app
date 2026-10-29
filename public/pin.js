@@ -130,6 +130,9 @@
                 id: idFor(dep, st.station), jid: dep.journey_id, line: dep.line, direction: dep.direction,
                 color: dep.lineColor, board: st.stops[b].name, boardIdx: b,
                 exit: st.stops[st.exitIdx].name, exitIdx: st.exitIdx, planned: planned(dep),
+                // trains: lets the server put the Wagenreihung into the notification
+                trainCat: dep.trainCat || null, trainNum: dep.trainNum || null,
+                boardEva: st.stops[b].eva || dep.fromEva || null, exitEva: st.stops[st.exitIdx].eva || null,
             },
         };
         try {
@@ -218,6 +221,7 @@
             const remain = v.phase === 'before' ? (v.minsToDep > 0 ? `Abfahrt in ${v.minsToDep} Min` : 'Fährt ab')
                 : v.phase === 'exit' ? 'Gleich da – aussteigen!' : `noch ${v.minsLeft} Min`;
             mid = `<div class="pc-stops${v.phase === 'exit' ? ' exit' : ''}">${field('Vorheriger', v.prev)}${field(v.label, v.cur, 'cur')}${field('Nächster', v.next)}</div>
+              ${formationHtml(v.formation)}
               <div class="pc-bar" role="img" aria-label="Fortschritt der Fahrt: ${pct} Prozent"><div class="pc-track"><b style="width:${pct}%"></b>${ticks}<span class="pc-train" style="left:${pct}%"></span></div>
                 <div class="pc-labels"><span>${esc(v.board.name)}</span><strong>${esc(remain)}</strong><span>${esc(v.exit.name)}</span></div></div>`;
         } else {
@@ -231,6 +235,21 @@
           <div class="pc-actions"><button type="button" class="pc-open">Linienverlauf</button><button type="button" class="pc-unpin">Lösen</button></div>`;
         el.querySelector('.pc-open').onclick = openPinned;
         el.querySelector('.pc-unpin').onclick = unpin;
+    }
+
+    // compact Wagenreihung (same data as in the notification picture)
+    function formationHtml(fm) {
+        if (!fm || !Array.isArray(fm.cars) || !fm.cars.length) return '';
+        const cars = fm.cars.map((c) => {
+            const cls = c.k === 'loco' || c.k === 'powercar' ? (c.c ? 'pw' : 'loco') : (c.c === '1' || c.c === '12' ? 'first' : (c.c === 'B' ? 'bistro' : 'second'));
+            const lab = cls === 'loco' ? '' : (cls === 'first' ? '1' : (cls === 'bistro' ? 'B' : '2'));
+            return `<span class="pc-car ${cls}${c.x ? ' closed' : ''}" style="left:${c.s}%;width:${Math.max(0.5, c.e - c.s)}%">${lab}</span>`;
+        }).join('');
+        const secs = (fm.sectors || []).map((s) => `<i style="left:${(s.s + s.e) / 2}%">${esc(s.n)}</i>`).join('');
+        const dir = fm.direction === 'left' || fm.direction === 'right' ? `<span class="pc-dir ${fm.direction}" aria-hidden="true"></span>` : '';
+        return `<div class="pc-fm" role="img" aria-label="Wagenreihung ${fm.platform ? 'Gleis ' + esc(fm.platform) : ''} in ${esc(fm.station || '')}">
+            <div class="pc-pf"><strong>${fm.platform ? 'Gl. ' + esc(fm.platform) : 'Gleis'}</strong><small>${fm.where === 'exit' ? 'Ausstieg' : 'Einstieg'}</small></div>
+            <div class="pc-cars"><div class="pc-secs">${secs}</div><div class="pc-row">${cars}${dir}</div></div></div>`;
     }
 
     function openPinned() {

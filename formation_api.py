@@ -94,13 +94,13 @@ def _fm_enqueue(job_key, params):
             _fm_jobs.pop(k, None)
         if job_key not in _fm_jobs and len(_fm_jobs) < 60:
             _fm_jobs[job_key] = {'params': params, 'at': now, 'taken': 0}
+    _fm_new_job.set()                          # wake a waiting helper (long poll)
 
 
-@bp.route('/api/formation/agent/jobs')
-def api_formation_agent_jobs():
-    if not _agent_ok():
-        return jsonify({'error': 'forbidden'}), 403
-    _agent['seen'] = time.time()
+_fm_new_job = threading.Event()
+
+
+def _take_jobs():
     out = []
     with _fm_jobs_lock:
         now = time.time()
@@ -113,7 +113,30 @@ def api_formation_agent_jobs():
                 out.append({'key': k, 'params': j['params']})
             if len(out) >= 6:
                 break
-    return jsonify({'jobs': out, 'path': formation.PATH})
+    return out
+
+
+@bp.route('/api/formation/agent/jobs')
+def api_formation_agent_jobs():
+    if not _agent_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    _agent['seen'] = time.time()
+    # ?wait=25: keep the request open until a job arrives (saves battery on a phone helper)
+    try:
+        wait = max(0.0, min(25.0, float(request.args.get('wait') or 0)))
+    except ValueError:
+        wait = 0.0
+    out = _take_jobs()
+    end = time.time() + wait
+    while not out and time.time() < end:
+        _fm_new_job.clear()
+        out = _take_jobs()
+        if out:
+            break
+        _fm_new_job.wait(min(5.0, max(0.05, end - time.time())))
+        out = _take_jobs()
+    _agent['seen'] = time.time()
+    return jsonify({'jobs': out, 'path': formation.PATH, 'wait': True})
 
 
 @bp.route('/api/formation/agent/result', methods=['POST'])

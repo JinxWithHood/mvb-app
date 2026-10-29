@@ -9275,3 +9275,18 @@ body.settings-open { overflow: hidden; }
 .pc-open { border: 0; background: var(--primary); color: #fff; }
 .pc-unpin { border: 1px solid var(--card-border); background: var(--card-solid); color: var(--text-primary); }
 @media (prefers-reduced-motion: reduce) { .pc-train { transition: none; } }
+.pc-fm { display: flex; align-items: center; gap: 10px; }
+.pc-pf { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 54px; height: 44px; border-radius: 12px; background: var(--surface); }
+.pc-pf strong { font-size: 0.9rem; color: var(--primary); }
+.pc-pf small { font-size: 0.62rem; color: var(--text-muted); }
+.pc-cars { position: relative; flex: 1; min-width: 0; height: 44px; margin: 0 12px; }
+.pc-secs i { position: absolute; top: 0; transform: translateX(-50%); font-style: normal; font-size: 0.66rem; font-weight: 700; color: var(--text-muted); }
+.pc-row { position: absolute; left: 0; right: 0; top: 18px; height: 20px; }
+.pc-car { position: absolute; top: 0; height: 20px; box-sizing: border-box; padding: 0; border-radius: 4px; border: 1.5px solid var(--text-muted); background: var(--card-solid); display: flex; align-items: center; justify-content: center; font-size: 0.62rem; font-weight: 800; color: var(--text-muted); overflow: hidden; }
+.pc-car.first { border-color: #d97706; background: rgba(245, 158, 11, .18); color: #b45309; }
+.pc-car.bistro { border-color: #dc2626; background: rgba(229, 72, 77, .14); color: #b91c1c; }
+.pc-car.loco { top: 3px; height: 17px; border-color: var(--text-muted); background: var(--text-muted); opacity: .6; }
+.pc-car.closed { opacity: .4; border-style: dashed; }
+.pc-dir { position: absolute; top: 5px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+.pc-dir.right { right: -11px; border-left: 7px solid var(--primary); }
+.pc-dir.left { left: -11px; border-right: 7px solid var(--primary); }

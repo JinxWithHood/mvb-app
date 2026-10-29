@@ -3782,22 +3782,55 @@ import pin as _pin
 PUBLIC_URL = (os.environ.get('PUBLIC_URL') or (VAPID_SUBJECT if VAPID_SUBJECT.startswith('https://') else '')).rstrip('/')
 
 
-def _pin_secret():
-    try:
-        return hashlib.sha256(b'pin-card:' + _vapid()['key'].private_numbers().private_value.to_bytes(32, 'big')).digest()
-    except Exception:
-        return hashlib.sha256(b'pin-card:' + str(_BOOT_TS).encode()).digest()
+_pin_cards = {}          # card id -> (ts, view) – what the notification image shows
+_PIN_CARD_TTL = 3 * 3600
 
 
-def _pin_image_url(v):
+def _pin_media(v):
+    """(image url, icon url) for the notification – or (None, None) without Pillow/public url."""
     if not PUBLIC_URL:
-        return None
+        return None, None
     try:
         import PIL  # noqa: F401  (no Pillow -> text only)
     except Exception:
+        return None, None
+    key, keep = _pin.card_key(v)
+    now = time.time()
+    _pin_cards[key] = (now, keep)
+    if len(_pin_cards) > 600:
+        for k in [k for k, (t, _) in _pin_cards.items() if now - t > _PIN_CARD_TTL] or sorted(_pin_cards, key=lambda k: _pin_cards[k][0])[:100]:
+            _pin_cards.pop(k, None)
+    color = (v.get('color') or '#018e4a').lstrip('#')
+    from urllib.parse import quote
+    return (f"{PUBLIC_URL}/api/pin/card/{key}.png",
+            f"{PUBLIC_URL}/api/pin/icon.png?l={quote(v.get('line') or '')}&c={color}")
+
+
+def _pin_formation(p, v):
+    """Wagenreihung for the notification: boarding station before departure, exit station after."""
+    if not p.get('trainCat') or not p.get('trainNum') or p['trainCat'] not in formation.TRAIN_CATS:
         return None
-    data, sig = _pin.image_token(v, _pin_secret())
-    return f"{PUBLIC_URL}/api/pin/card.png?d={data}&s={sig}"
+    order = [('board', p.get('boardEva'), v['board']), ('exit', p.get('exitEva'), v['exit'])]
+    if v['phase'] != 'before':
+        order.reverse()
+    for where, eva, stop in order:
+        if not eva or not stop.get('plannedEpoch'):
+            continue
+        when = datetime.datetime.fromtimestamp(stop['plannedEpoch'], local_tz).replace(tzinfo=None, second=0, microsecond=0)
+        try:
+            raw = formation.fetch(eva, p['trainCat'], p['trainNum'], when)
+        except formation.Blocked:
+            if _formation_api._agent_online():          # the helper at home fetches it, next update shows it
+                _formation_api._fm_enqueue(formation.cache_key(eva, p['trainCat'], p['trainNum'], when),
+                                           formation.params_for(eva, p['trainCat'], p['trainNum'], when))
+            raw = None
+        except Exception as ex:
+            print(f"[WARN] Pin-Wagenreihung: {ex}")
+            raw = None
+        fm = _pin.compact_formation(formation.normalize(raw) if raw else None, where, stop['name'])
+        if fm:
+            return fm
+    return None
 
 
 def _pin_view(p, now=None):
@@ -3806,7 +3839,13 @@ def _pin_view(p, now=None):
     except Exception as ex:
         print(f"[WARN] Pin-Fahrt nicht geladen: {ex}")
         return None
-    return _pin.view(p, trip, now or time.time())
+    v = _pin.view(p, trip, now or time.time())
+    if v and v['phase'] != 'done':
+        try:
+            v['formation'] = _pin_formation(p, v)
+        except Exception as ex:
+            print(f"[WARN] Pin-Wagenreihung: {ex}")
+    return v
 
 
 def _pin_push(key, sub, p, now):
@@ -3822,7 +3861,8 @@ def _pin_push(key, sub, p, now):
     send, alert = _pin.decide(p, v, now)
     if not send:
         return None
-    msg = _pin.message(p, v, alert, image_url=_pin_image_url(v))
+    image, icon = _pin_media(v)
+    msg = _pin.message(p, v, alert, image_url=image, icon_url=icon)
     ok = _send_push(sub, msg, ttl=300, urgency='high' if alert else 'normal')
     if ok is None:
         return 'gone'
@@ -3897,7 +3937,8 @@ def push_pin():
         _save_json_file(PUSH_SUBS_FILE, _subs())
     try:
         _pin.decide(p, v, now)
-        _send_push(sub, _pin.message(p, v, False, image_url=_pin_image_url(v)), ttl=300, urgency='normal')
+        image, icon = _pin_media(v)
+        _send_push(sub, _pin.message(p, v, False, image_url=image, icon_url=icon), ttl=300, urgency='normal')
         with _push_lock:
             _save_json_file(PUSH_SUBS_FILE, _subs())
     except Exception as ex:
@@ -3907,18 +3948,34 @@ def push_pin():
     return jsonify({'ok': True, 'pin': public, 'view': v})
 
 
-@app.route('/api/pin/card.png')
-def pin_card_png():
-    v = _pin.read_token(request.args.get('d', ''), request.args.get('s', ''), _pin_secret())
-    if not v:
-        return jsonify({'error': 'ungültig'}), 403
+@app.route('/api/pin/card/<key>.png')
+def pin_card_png(key):
+    hit = _pin_cards.get(key) if re.fullmatch(r'[0-9a-f]{20}', key or '') else None
+    if not hit:
+        return jsonify({'error': 'nicht (mehr) vorhanden'}), 404
     try:
-        png = _pin.card_png(v)
+        png = _pin.card_png(hit[1])
     except Exception as ex:
         print(f"[WARN] Pin-Bild: {ex}")
         return jsonify({'error': 'kein Bild'}), 500
     resp = app.response_class(png, mimetype='image/png')
     resp.headers['Cache-Control'] = 'public, max-age=86400, immutable'
+    return resp
+
+
+@app.route('/api/pin/icon.png')
+def pin_icon_png():
+    line = (request.args.get('l') or '')[:12]
+    color = '#' + (request.args.get('c') or '018e4a')[:6]
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        color = '#018e4a'
+    try:
+        png = _pin.icon_png(line, color)
+    except Exception as ex:
+        print(f"[WARN] Pin-Icon: {ex}")
+        return jsonify({'error': 'kein Bild'}), 500
+    resp = app.response_class(png, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'public, max-age=604800'
     return resp
 
 
