@@ -17,6 +17,8 @@ backend.py            Flask-Server (API + liefert die Website aus)
 news_api.py           Störungsmeldungen (Verkehrsmelder) + MVB-News
 formation_api.py      Wagenreihung: API-Routen + Helfer daheim
 formation.py          Wagenreihung: bahn.de abfragen und aufbereiten
+pin.py                Fahrt anpinnen: Live-Benachrichtigung (Stand der Fahrt + Bild)
+fonts/                Schrift für das Benachrichtigungs-Bild (Inter, OFL)
 dbweb.py, transitous.py  Weitere Fahrplan-Quellen (bahn.de, Transitous)
 admin.py              Admin-Bereich
 relay/                Wagenreihungs-Helfer für zu Hause
@@ -30,6 +32,7 @@ public/               Alles, was der Browser bekommt
   push.js             Push-Benachrichtigungen & Abfahrts-Wecker
   pwa.js              App-Installation
   jinx-fx.js          🤫
+  pin.js              Fahrt anpinnen (Linienverlauf + Karte auf der Startseite)
   offline.js          Offline-Modus (letzte Abfahrten/Verläufe auf dem Gerät)
   formation.js        Wagenreihung / Gleisbelegung
   sw.js, manifest.json  App-/Offline-Funktionen

@@ -90,11 +90,12 @@
             sub = await subscribeWithKey(publicKey);
         }
         ls.set(LS.key, publicKey);
-        const res = await api('/push/subscribe', { subscription: sub.toJSON(), prefs, reminders });
+        const res = await api('/push/subscribe', { subscription: sub.toJSON(), prefs, reminders, pin: ls.get('mvb_pin', null) });
         if (Array.isArray(res.reminders)) {
             reminders = res.reminders;
             ls.set(LS.rem, reminders);
         }
+        if ('pin' in res) document.dispatchEvent(new CustomEvent('mvbpin:sync', { detail: res.pin }));
     }
 
     function syncSoon() {
@@ -142,6 +143,7 @@
         sub = null;
         reminders = [];
         ls.set(LS.rem, reminders);
+        document.dispatchEvent(new CustomEvent('mvbpin:sync', { detail: null }));
         busy = false;
         render();
         document.dispatchEvent(new CustomEvent('mvbpush:change'));
@@ -367,6 +369,13 @@
     };
 
     MVBPush.isServerPushActive = () => state() === 'on';
+    // used by pin.js (Fahrt anpinnen)
+    MVBPush.state = () => state();
+    MVBPush.supported = supported;
+    MVBPush.ensureOn = async () => (state() === 'on' ? true : enable());
+    MVBPush.endpoint = () => (sub ? sub.endpoint : null);
+    MVBPush.api = (path, body) => api(path, body);
+    MVBPush.depEpoch = (dep) => depEpoch(dep);
 
     MVBPush.init = async function (o) {
         opts = Object.assign(opts, o || {});

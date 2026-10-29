@@ -2,7 +2,7 @@
 // - network-first for the app shell (updates arrive immediately)
 // - cache-first for images/fonts, never caches live API data
 // - Web Push: shows notifications from the server, opens the right tab on tap
-const CACHE_NAME = 'mvb-magdeburg-cache-v9-17';
+const CACHE_NAME = 'mvb-magdeburg-cache-v9-18';
 const CORE_URLS = [
   '/',
   '/index.html',
@@ -19,6 +19,7 @@ const CORE_URLS = [
   '/secret.js',
   '/formation.js',
   '/offline.js',
+  '/pin.js',
   '/manifest.json',
   '/assets/icon.svg',
   '/assets/icon-192.png',
@@ -99,6 +100,11 @@ self.addEventListener('push', event => {
     data = { title: 'Magdeburg Mobil', body: event.data ? event.data.text() : '' };
   }
   const title = data.title || 'Magdeburg Mobil';
+  // Fahrt anpinnen: one notification (tag "pin") that keeps replacing itself
+  if (data.kind === 'pin' || data.kind === 'pin-end') {
+    event.waitUntil(showPin(data, title));
+    return;
+  }
   const options = {
     body: data.body || '',
     icon: '/assets/icon-192.png',
@@ -116,7 +122,55 @@ self.addEventListener('push', event => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+async function showPin(data, title) {
+  const ended = data.kind === 'pin-end';
+  const alert = !!data.alert;
+  const options = {
+    body: data.body || '',
+    icon: '/assets/icon-192.png',
+    badge: '/assets/badge-72.png',
+    tag: 'pin',
+    renotify: alert,
+    silent: !alert,
+    requireInteraction: !ended,
+    timestamp: Date.now(),
+    data: { url: data.url || '/?tab=home', kind: data.kind, pinId: data.pinId || null },
+    actions: ended ? [] : [{ action: 'open', title: 'Linienverlauf' }, { action: 'unpin', title: 'Lösen' }],
+  };
+  if (alert) options.vibrate = [160, 80, 160];
+  if (data.image) options.image = data.image;
+  await self.registration.showNotification(title, options);
+  // tell open app windows (pinned card on the start page)
+  const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  all.forEach(c => c.postMessage({ type: 'pin-update', ended }));
+  if (ended) {
+    // show "Angekommen / gelöst" briefly, then clear it
+    await new Promise(r => setTimeout(r, 6000));
+    const list = await self.registration.getNotifications({ tag: 'pin' });
+    list.forEach(n => { if (n.data && n.data.kind === 'pin-end') n.close(); });
+  }
+}
+
+async function unpinFromNotification() {
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    if (sub) {
+      await fetch(`${apiBase()}/push/pin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint, cancel: true, notify: false }),
+      });
+    }
+  } catch (e) { /* the app cleans up on next start */ }
+  const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  all.forEach(c => c.postMessage({ type: 'pin-update', ended: true }));
+}
+
 self.addEventListener('notificationclick', event => {
+  if (event.notification.tag === 'pin' && event.action === 'unpin') {
+    event.notification.close();
+    event.waitUntil(unpinFromNotification());
+    return;
+  }
   event.notification.close();
   const target = (event.notification.data && event.notification.data.url) || '/';
   const tab = new URL(target, self.location.origin).searchParams.get('tab');
@@ -125,7 +179,7 @@ self.addEventListener('notificationclick', event => {
     const client = all.find(c => new URL(c.url).origin === self.location.origin);
     if (client) {
       await client.focus();
-      if (tab) client.postMessage({ type: 'open-tab', tab });
+      if (tab) client.postMessage({ type: 'open-tab', tab, pin: new URL(target, self.location.origin).searchParams.get('pin') === '1' });
       return;
     }
     await self.clients.openWindow(target);

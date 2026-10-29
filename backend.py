@@ -3625,6 +3625,10 @@ def _push_tick(force=False):
         out['reminders'] = _check_reminders()
     except Exception as ex:
         print(f"[WARN] Erinnerungen: {ex}")
+    try:
+        out['pins'] = _check_pins()
+    except Exception as ex:
+        print(f"[WARN] Angepinnte Fahrten: {ex}")
     if force or now - _push['last_disr'] > 150:
         _push['last_disr'] = now
         try:
@@ -3712,9 +3716,16 @@ def push_subscribe():
             entry['reminders'] = [_clean_reminder(r) for r in data['reminders'][:20]
                                   if isinstance(r, dict) and r.get('jid')]
             entry['reminders'] = [r for r in entry['reminders'] if r]
+        # pinned trip the device still knows about
+        if data.get('pin') and not entry.get('pin'):
+            p = _pin.clean(data['pin'])
+            if p and p['planned'] / 1000 > time.time() - _pin.MAX_AGE:
+                entry['pin'] = p
         _subs()[key] = entry
         _save_json_file(PUSH_SUBS_FILE, _subs())
-    return jsonify({'ok': True, 'reminders': entry.get('reminders', [])})
+    pin_public = {k: entry['pin'][k] for k in ('id', 'jid', 'line', 'direction', 'color', 'board', 'exit', 'planned')} \
+        if entry.get('pin') else None
+    return jsonify({'ok': True, 'reminders': entry.get('reminders', []), 'pin': pin_public})
 
 
 @app.route('/api/push/unsubscribe', methods=['POST'])
@@ -3761,6 +3772,154 @@ def push_remind():
         _save_json_file(PUSH_SUBS_FILE, _subs())
     _ensure_push_watcher()
     return jsonify({'ok': True, 'reminder': rem, 'reminders': sub['reminders']})
+
+
+# ---------------------------------------------------------------------------
+# Fahrt anpinnen: live notification for one trip per device (logic in pin.py)
+# ---------------------------------------------------------------------------
+import pin as _pin
+
+PUBLIC_URL = (os.environ.get('PUBLIC_URL') or (VAPID_SUBJECT if VAPID_SUBJECT.startswith('https://') else '')).rstrip('/')
+
+
+def _pin_secret():
+    try:
+        return hashlib.sha256(b'pin-card:' + _vapid()['key'].private_numbers().private_value.to_bytes(32, 'big')).digest()
+    except Exception:
+        return hashlib.sha256(b'pin-card:' + str(_BOOT_TS).encode()).digest()
+
+
+def _pin_image_url(v):
+    if not PUBLIC_URL:
+        return None
+    try:
+        import PIL  # noqa: F401  (no Pillow -> text only)
+    except Exception:
+        return None
+    data, sig = _pin.image_token(v, _pin_secret())
+    return f"{PUBLIC_URL}/api/pin/card.png?d={data}&s={sig}"
+
+
+def _pin_view(p, now=None):
+    try:
+        trip = _fetch_trip(p['jid'])
+    except Exception as ex:
+        print(f"[WARN] Pin-Fahrt nicht geladen: {ex}")
+        return None
+    return _pin.view(p, trip, now or time.time())
+
+
+def _pin_push(key, sub, p, now):
+    """Send the update for one pinned trip if due. Returns 'sent', 'ended', 'gone' or None."""
+    v = _pin_view(p, now)
+    if v is None:
+        if now > p['planned'] / 1000 + _pin.MAX_AGE:
+            return 'ended'
+        return None
+    if v['phase'] == 'done':
+        _send_push(sub, _pin.end_message(p, v), ttl=900, urgency='normal')
+        return 'ended'
+    send, alert = _pin.decide(p, v, now)
+    if not send:
+        return None
+    msg = _pin.message(p, v, alert, image_url=_pin_image_url(v))
+    ok = _send_push(sub, msg, ttl=300, urgency='high' if alert else 'normal')
+    if ok is None:
+        return 'gone'
+    return 'sent'
+
+
+def _check_pins():
+    now = time.time()
+    sent, changed, drop = 0, False, []
+    for key, sub in list(_subs().items()):
+        p = sub.get('pin')
+        if not p:
+            continue
+        if now < p['planned'] / 1000 - 3 * 3600:       # far in the future: wait
+            continue
+        before = json.dumps(p.get('st'), sort_keys=True)
+        res = _pin_push(key, sub, p, now)
+        if res == 'gone':
+            drop.append(key)
+        elif res == 'ended':
+            sub.pop('pin', None)
+            changed = True
+        elif res == 'sent':
+            sent += 1
+        if json.dumps(p.get('st'), sort_keys=True) != before:
+            changed = True
+    for key in drop:
+        _drop_sub(key)
+    if changed:
+        with _push_lock:
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+    return sent
+
+
+@app.route('/api/push/pin', methods=['POST'])
+def push_pin():
+    """Pin a trip ({endpoint, pin}), unpin ({endpoint, cancel: true}) or read it ({endpoint, view: true})."""
+    data = request.get_json(silent=True) or {}
+    key = _sub_key(data.get('endpoint', ''))
+    sub = _subs().get(key)
+    if not sub:
+        return jsonify({'error': 'Gerät nicht registriert'}), 404
+    if data.get('cancel'):
+        with _push_lock:
+            had = sub.pop('pin', None)
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+        if had and data.get('notify', True):
+            _send_push(sub, {'kind': 'pin-end', 'tag': 'pin', 'silent': True, 'title': 'Fahrt gelöst',
+                             'body': f"{had.get('line', '')} ist nicht mehr angepinnt.", 'url': '/?tab=home'},
+                       ttl=120, urgency='normal')
+        return jsonify({'ok': True, 'pin': None})
+    if data.get('view'):
+        p = sub.get('pin')
+        if not p:
+            return jsonify({'pin': None})
+        v = _pin_view(p)
+        public = {k: p[k] for k in ('id', 'jid', 'line', 'direction', 'color', 'board', 'exit', 'planned')}
+        return jsonify({'pin': public, 'view': v})
+    p = _pin.clean(data.get('pin'))
+    if not p:
+        return jsonify({'error': 'Ungültige Fahrt'}), 400
+    if p['planned'] / 1000 < time.time() - _pin.MAX_AGE:
+        return jsonify({'error': 'Die Fahrt ist schon vorbei'}), 400
+    now = time.time()
+    v = _pin_view(p, now)
+    if v is None:
+        return jsonify({'error': 'Ausstieg nicht im Fahrtverlauf gefunden'}), 400
+    if v['phase'] == 'done':
+        return jsonify({'error': 'Die Fahrt ist schon angekommen'}), 400
+    with _push_lock:
+        sub['pin'] = p
+        _save_json_file(PUSH_SUBS_FILE, _subs())
+    try:
+        _pin.decide(p, v, now)
+        _send_push(sub, _pin.message(p, v, False, image_url=_pin_image_url(v)), ttl=300, urgency='normal')
+        with _push_lock:
+            _save_json_file(PUSH_SUBS_FILE, _subs())
+    except Exception as ex:
+        print(f"[WARN] Pin-Push: {ex}")
+    _ensure_push_watcher()
+    public = {k: p[k] for k in ('id', 'jid', 'line', 'direction', 'color', 'board', 'exit', 'planned')}
+    return jsonify({'ok': True, 'pin': public, 'view': v})
+
+
+@app.route('/api/pin/card.png')
+def pin_card_png():
+    v = _pin.read_token(request.args.get('d', ''), request.args.get('s', ''), _pin_secret())
+    if not v:
+        return jsonify({'error': 'ungültig'}), 403
+    try:
+        png = _pin.card_png(v)
+    except Exception as ex:
+        print(f"[WARN] Pin-Bild: {ex}")
+        return jsonify({'error': 'kein Bild'}), 500
+    resp = app.response_class(png, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'public, max-age=86400, immutable'
+    return resp
 
 
 _BOOT_TS = time.time()

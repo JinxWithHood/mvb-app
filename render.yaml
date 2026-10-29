@@ -20,6 +20,9 @@ services:
       # Wagenreihung über den Helfer daheim (relay/wagenreihung_helfer.py) – selbst ausgedachter Schlüssel
       - key: FORMATION_AGENT_KEY
         sync: false
+      # Optional: Adresse der App für das Bild in der "Fahrt anpinnen"-Benachrichtigung (Standard: https://mvb-app.onrender.com)
+      - key: PUBLIC_URL
+        sync: false
       - key: UPSTASH_REDIS_REST_URL
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN

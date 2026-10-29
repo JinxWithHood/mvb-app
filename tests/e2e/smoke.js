@@ -128,6 +128,41 @@ async function openCard(page, i) {
     check(await page.evaluate(() => document.querySelectorAll('.fm-tabs, .fm-panel, .fm-car').length) === 0, 'helper offline: no tabs, no formation strips');
     check(errors.length === 0, `helper offline: no JavaScript errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
     await ctx.close();
+
+    // ---- 4. Fahrt anpinnen: bar in the Linienverlauf, exit picker, card on the start page
+    {
+      const { ctx, page, errors } = await openApp(browser, 5099);
+      let stored = null;
+      const view = { phase: 'ride', label: 'Aktuell', pct: 0.5, ticks: [0, 1], delay: 2, cancelled: false, minsToDep: -3, minsLeft: 19,
+        prev: { name: 'Hauptbahnhof', time: at(-3) }, cur: { name: 'Hauptbahnhof', time: at(-3) }, next: { name: 'Westerhüsen', time: at(19) },
+        board: { name: 'Hauptbahnhof', time: at(-3) }, exit: { name: 'Westerhüsen', time: at(19) } };
+      await ctx.route('**/api/push/pin', (r) => {
+        const body = JSON.parse(r.request().postData() || '{}');
+        if (body.pin) stored = body.pin;
+        if (body.cancel) stored = null;
+        r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, pin: stored, view: stored ? view : null }) });
+      });
+      // no real push service in a test browser: pretend push is switched on
+      await page.evaluate(() => { MVBPush.ensureOn = async () => true; MVBPush.endpoint = () => 'https://push.example/test'; });
+      await openCard(page, 1);                                   // tram line 2
+      check(await visible(page, '.pin-slot .pin-bar') === 1, '[pin] "Fahrt anpinnen" shows in the Linienverlauf');
+      await page.evaluate(() => [...document.querySelectorAll('.pin-slot [data-act=pick]')].find((b) => b.offsetParent).click());
+      await page.waitForTimeout(400);
+      check(await visible(page, '.pin-stop') >= 1, '[pin] exit stops can be picked');
+      await page.evaluate(() => [...document.querySelectorAll('.pin-slot [data-act=go]')].find((b) => b.offsetParent).click());
+      await page.waitForTimeout(800);
+      check(!!stored && stored.exit === 'Westerhüsen' && stored.board === 'Hauptbahnhof', '[pin] pin request carries boarding and exit stop');
+      check(await visible(page, '.pin-bar.on') === 1, '[pin] bar switches to "Angepinnt"');
+      await page.evaluate(() => { const b = document.querySelector('#closeModal'); if (b && b.offsetParent) b.click(); MVBApp.switchTab('home'); });
+      await page.waitForTimeout(800);
+      const card = await page.evaluate(() => { const c = document.getElementById('pinCard'); return c && !c.hidden && { cur: c.querySelector('.pc-stop.cur strong')?.textContent, delay: c.querySelector('.pc-delay')?.textContent }; });
+      check(card && card.cur === 'Hauptbahnhof' && card.delay === '+2 Min', '[pin] start page shows the pinned trip');
+      await page.evaluate(() => document.querySelector('#pinCard .pc-unpin').click());
+      await page.waitForTimeout(600);
+      check(stored === null && await page.evaluate(() => document.getElementById('pinCard').hidden), '[pin] "Lösen" unpins');
+      check(errors.length === 0, `[pin] no JavaScript errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+      await ctx.close();
+    }
   } catch (e) {
     failures.push(String(e && e.stack || e));
     console.error(e);

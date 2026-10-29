@@ -8,3 +8,4 @@ pytz
 cryptography
 gunicorn
 tzdata
+Pillow

@@ -2095,6 +2095,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (first) window.MVBPush.renderReminder(els.remind, first, first.station_name);
             else els.remind.innerHTML = '';
         }
+        if (window.MVBPin) window.MVBPin.render(document.getElementById(desktop ? 'detailsPin' : 'modalPin'), null);
         renderLegSwitch(els.route, {});
         if (window.MVBFormation) { try { window.MVBFormation.attachDetail(els.route, {}, null); } catch (e) { /* clears an old box */ } }
         const draw = (animate) => {
@@ -2132,6 +2133,7 @@ document.addEventListener('DOMContentLoaded', () => {
         detailsTitle.textContent = `${titlePrefix}${cleanLineName}`;
         detailsSubtitle.textContent = `Richtung ${dep.direction}`;
         if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('detailsRemind'), dep, dep.station_name || (currentStation && currentStation.name));
+        if (window.MVBPin) window.MVBPin.render(document.getElementById('detailsPin'), dep, dep.station_name || (currentStation && currentStation.name));
         renderLegSwitch(detailsRoute, dep);
         if (window.MVBFormation) { try { window.MVBFormation.attachDetail(detailsRoute, dep, currentStation); } catch (e) { /* optional */ } }
 
@@ -2169,6 +2171,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderStopsTimelineHTML(data, detailsRoute, detailsMessages, !isQuiet);
                     if (window.MVBOffline) { window.MVBOffline.clearBanner(detailsMessages); if (data && Array.isArray(data.stops)) window.MVBOffline.save('jr', targetId, data); }
                     if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(detailsRoute, data.stops); } catch (e) { /* optional */ } }
+                if (window.MVBPin) window.MVBPin.setStops(document.getElementById('detailsPin'), data.stops);
                     markTripSegment(detailsRoute, dep);
                     updateDepartureCardDelay(targetId, data);
                     renderOperator(data.operator, detailsOperator);
@@ -2200,6 +2203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         journeyModalTitle.textContent = `${titlePrefix}${cleanLineName}`;
         modalDirection.textContent = `Richtung ${dep.direction}`;
         if (window.MVBPush) window.MVBPush.renderReminder(document.getElementById('modalRemind'), dep, dep.station_name || (currentStation && currentStation.name));
+        if (window.MVBPin) window.MVBPin.render(document.getElementById('modalPin'), dep, dep.station_name || (currentStation && currentStation.name));
         renderLegSwitch(journeyRoute, dep);
         if (window.MVBFormation) { try { window.MVBFormation.attachDetail(journeyRoute, dep, currentStation); } catch (e) { /* optional */ } }
 
@@ -2244,6 +2248,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderStopsTimelineHTML(data, journeyRoute, journeyMessages, !isQuiet);
                 if (window.MVBOffline) { window.MVBOffline.clearBanner(journeyMessages); if (data && Array.isArray(data.stops)) window.MVBOffline.save('jr', mobTargetId, data); }
                 if (window.MVBFormation && window.MVBFormation.setStops) { try { window.MVBFormation.setStops(journeyRoute, data.stops); } catch (e) { /* optional */ } }
+                if (window.MVBPin) window.MVBPin.setStops(document.getElementById('modalPin'), data.stops);
                 markTripSegment(journeyRoute, dep);
                 updateDepartureCardDelay(mobTargetId, data);
                 renderOperator(data.operator, modalOperator);
