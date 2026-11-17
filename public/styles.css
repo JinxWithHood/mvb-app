@@ -9290,3 +9290,20 @@ body.settings-open { overflow: hidden; }
 .pc-dir { position: absolute; top: 5px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
 .pc-dir.right { right: -11px; border-left: 7px solid var(--primary); }
 .pc-dir.left { left: -11px; border-right: 7px solid var(--primary); }
+
+/* Sparmodus, Stufe „Kartoffel-PC“: wirklich alles Teure aus */
+.map-lq *, .map-lq *::before, .map-lq *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+.map-lq .mv-body, .map-lq .mv-label, .map-lq .hst, .map-lq .map-legend, .map-lq .map-focus,
+.map-lq .leaflet-control, .map-lq .map-toolbar, .map-lq .map-status { box-shadow: none !important; }
+.map-lq .mv-nose { display: none !important; }
+.map-lq .leaflet-tile-container img { image-rendering: auto; }
+.map-lq .leaflet-fade-anim .leaflet-tile, .map-lq .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
+.map-shell.map-lq { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }
+.map-lq .map-status, .map-lq .map-actions, .map-lq .map-legend { background: var(--card-solid) !important; }

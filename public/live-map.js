@@ -41,8 +41,16 @@
     let lastRadarText = '';
 
     const trackLayers = [];        // {layer, role}
+    let lastLines = [];            // last /api/line-shapes result (redraw when the Sparmodus changes)
+    let lqRenderer = null;         // one shared canvas for everything in the Sparmodus
+    function lineRenderer() {
+        if (!lowQ) return {};
+        if (!lqRenderer) lqRenderer = L.canvas({ padding: 0.25, tolerance: 6 });
+        return { renderer: lqRenderer };
+    }
     const lineShapes = new Map();  // key -> {meta, layers:[{layer, role}], sig}
     let stationLayer = null;
+    let updateLabelsFn = null;
     const vehicles = new Map();    // id -> state
     const tripCache = new Map();   // id -> {ts, trip, prep}
     const tripLoading = new Map(); // id -> promise
@@ -61,7 +69,9 @@
     }
     let qualityPref = 'auto';      // auto | low | high
     try { qualityPref = localStorage.getItem('map_quality') || 'auto'; } catch (e) { /* ignore */ }
-    const autoLow = isTouchDevice() || (navigator.deviceMemory && navigator.deviceMemory <= 2);
+    // phones/tablets and weak computers (≤ 4 GB RAM or ≤ 2 CPU cores) start in the Sparmodus
+    const autoLow = isTouchDevice() || (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
+        (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2);
     let lowQ = qualityPref === 'low' || (qualityPref === 'auto' && autoLow);
 
     // ---------------------------------------------------------
@@ -225,6 +235,7 @@
     function createMap() {
         map = L.map('liveMap', {
             preferCanvas: lowQ,            // one canvas instead of hundreds of SVG paths
+            zoomAnimation: !lowQ,
             fadeAnimation: !lowQ,
             markerZoomAnimation: !lowQ,
             center: CENTER,
@@ -234,11 +245,13 @@
             zoomControl: false,
             attributionControl: true,
         });
+        map._zoomAnimAtInit = map._zoomAnimated;
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.attributionControl.setPrefix(false);
         tileLayer = L.tileLayer(tileUrl('base'), {
-            keepBuffer: lowQ ? 1 : 2,
+            keepBuffer: lowQ ? 0 : 2,
             updateWhenZooming: !lowQ,
+            updateWhenIdle: lowQ,
             maxZoom: 19,
             maxNativeZoom: 16,
             attribution: 'Karte © Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende · Gleise © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Linienwege & Live-Daten: INSA/HAFAS',
@@ -259,14 +272,15 @@
         pane('focusMarks', 640, true);
 
         labelLayer = L.tileLayer(tileUrl('labels'), { maxZoom: 19, maxNativeZoom: 16, pane: 'labels', opacity: 0.85 }).addTo(map);
+        updateLabelsFn = () => updateLabels();
         const updateLabels = () => {
             if (!labelLayer) return;
-            const show = map.getZoom() <= 13;
+            const show = map.getZoom() <= 13 && !lowQ;     // Sparmodus: no extra label tiles
             if (show && !map.hasLayer(labelLayer)) labelLayer.addTo(map);
             if (!show && map.hasLayer(labelLayer)) map.removeLayer(labelLayer);
         };
         map.on('zoomend', () => {
-            applyLineOffsets();
+            if (!lowQ) applyLineOffsets();
             applyAllStyles();
             updateStationVisibility();
             updateLabels();
@@ -301,7 +315,8 @@
         if (!segs.length) segs = (data.lines || []).flatMap(l => l.segs || []);
         if (!segs.length) return;
         ['rail'].forEach(role => {
-            const layer = L.polyline(segs, { pane: 'tracks', interactive: false, lineCap: 'round', lineJoin: 'round', smoothFactor: 1.2 });
+            const layer = L.polyline(segs, { pane: 'tracks', interactive: false, lineCap: 'round', lineJoin: 'round',
+                smoothFactor: lowQ ? 2.5 : 1.2, ...lineRenderer() });
             layer.addTo(map);
             trackLayers.push({ layer, role });
         });
@@ -395,7 +410,7 @@
         const el = map.getContainer();
         // stop signs only when zoomed in really close
         el.classList.toggle('hst-full', z >= 16);
-        const show = z >= 16;
+        const show = z >= (lowQ ? 17 : 16);
         if (show && !map.hasLayer(stationLayer)) stationLayer.addTo(map);
         if (!show && map.hasLayer(stationLayer)) map.removeLayer(stationLayer);
     }
@@ -409,7 +424,7 @@
         try {
             const res = await fetch(`${opts.apiBase}/line-shapes`);
             const data = await res.json();
-            if (Array.isArray(data.lines)) drawLineShapes(data.lines);
+            if (Array.isArray(data.lines)) { lastLines = data.lines; drawLineShapes(data.lines); }
             shapesBuilding = !!(data.building || data.pending);
             if (shapesBuilding) next = SHAPES_FAST_MS;
         } catch (e) {
@@ -425,32 +440,39 @@
         lines.forEach(line => {
             if (!line.key || !line.shapes || !line.shapes.length) return;
             seen.add(line.key);
-            const sig = line.color + '|' + line.shapes.map(s => s.length + ':' + (s[0] || []).join(',')).join(';');
+            const sig = (lowQ ? 'L' : 'H') + line.color + '|' + line.shapes.map(s => s.length + ':' + (s[0] || []).join(',')).join(';');
             const existing = lineShapes.get(line.key);
             if (existing && existing.sig === sig) { existing.meta = line; return; }
             if (existing) existing.layers.forEach(({ layer }) => map.removeLayer(layer));
             const isBus = line.type === 'bus';
             // trams are drawn as a track (sleepers + two rails), buses as a road (kerbs, asphalt, centre line)
-            const roles = isBus ? ['edge', 'asphalt', 'center'] : ['casing', 'sleepers', 'rails', 'gap'];
+            // Sparmodus: one plain line per route on a shared canvas – no rails, no road markings, no tooltips
+            const roles = lowQ ? ['plain'] : (isBus ? ['edge', 'asphalt', 'center'] : ['casing', 'sleepers', 'rails', 'gap']);
             const layers = roles.map(role => {
                 const layer = L.polyline(line.shapes, {
                     pane: isBus ? 'buslines' : 'tramlines',
-                    interactive: role === 'casing' || role === 'rails' || role === 'edge',
+                    interactive: role === 'casing' || role === 'rails' || role === 'edge' || role === 'plain',
                     bubblingMouseEvents: false,
                     lineCap: role === 'sleepers' || role === 'center' ? 'butt' : 'round',
                     lineJoin: 'round',
+                    smoothFactor: lowQ ? 2.5 : 1,
+                    ...lineRenderer(),
                 });
                 layer.on('click', () => setLineFocus(line.key));
-                layer.on('mouseover', () => { if (!focus) layer.getElement()?.classList.add('ml-hover'); });
-                layer.on('mouseout', () => layer.getElement()?.classList.remove('ml-hover'));
-                layer.bindTooltip(`Linie ${escapeHtml(line.short)}`, { sticky: true, className: 'map-tooltip ml-tip', direction: 'top', offset: [0, -8] });
+                if (!lowQ) {
+                    layer.on('mouseover', () => { if (!focus) layer.getElement()?.classList.add('ml-hover'); });
+                    layer.on('mouseout', () => layer.getElement()?.classList.remove('ml-hover'));
+                    layer.bindTooltip(`Linie ${escapeHtml(line.short)}`, { sticky: true, className: 'map-tooltip ml-tip', direction: 'top', offset: [0, -8] });
+                }
                 layer.addTo(map);
                 return { layer, role };
             });
             lineShapes.set(line.key, { meta: line, layers, sig, isBus });
         });
-        computeBundles();
-        applyLineOffsets();
+        if (!lowQ) {                       // side-by-side corridors cost a lot of CPU: not in the Sparmodus
+            computeBundles();
+            applyLineOffsets();
+        }
         restackLines();
         applyLineStyles();
         drawStations();
@@ -622,6 +644,11 @@
             const detail = z >= 14;          // close enough to see rails / road markings
             const f = strong ? 1.35 : 1;
             e.layers.forEach(({ layer, role }) => {
+                if (role === 'plain') {
+                    layer.setStyle({ color: c, weight: (e.isBus ? (detail ? 3.2 : 1.8) : (detail ? 4.2 : 2.8)) * s * f,
+                        opacity: (e.isBus ? 0.7 : 0.85) * k });
+                    return;
+                }
                 if (e.isBus) {
                     // road: coloured kerbs, grey asphalt, dashed white centre line
                     const busOp = z <= 12 ? 0.45 : 0.8;
@@ -735,7 +762,6 @@
     }
 
     function setLowQuality(on, byUser) {
-        const wasCanvas = map && map.options.preferCanvas;
         lowQ = !!on;
         if (byUser) {
             // back to "auto" when the choice matches what the device would get anyway
@@ -753,11 +779,30 @@
         if (map) {
             map.options.fadeAnimation = !lowQ;
             map.options.markerZoomAnimation = !lowQ;
+            map.options.zoomAnimation = !lowQ;
+            map._zoomAnimated = !lowQ && !!map._zoomAnimAtInit;   // can only come back if the map was built with it
+            if (tileLayer) { tileLayer.options.keepBuffer = lowQ ? 0 : 2; tileLayer.options.updateWhenIdle = lowQ; tileLayer.options.updateWhenZooming = !lowQ; }
+            if (updateLabelsFn) updateLabelsFn();
+            redrawForQuality();
         }
         if (byUser && window.MVBApp && window.MVBApp.showToast) {
-            const hint = map && wasCanvas !== lowQ ? ' Linien werden beim nächsten Öffnen umgestellt.' : '';
-            window.MVBApp.showToast(lowQ ? `Sparmodus an: weniger Effekte, flüssigere Karte.${hint}` : `Volle Qualität an.${hint}`, 'info');
+            window.MVBApp.showToast(lowQ
+                ? 'Sparmodus an: schlichte Linien, Fahrzeuge springen 1× pro Sekunde, keine Effekte.'
+                : 'Volle Qualität an.', 'info');
         }
+    }
+
+    // switch everything that is drawn differently in the Sparmodus, right away
+    function redrawForQuality() {
+        if (!map) return;
+        trackLayers.splice(0).forEach(({ layer }) => map.removeLayer(layer));
+        if (networkData) drawTracks(networkData);
+        lineShapes.forEach(e => { e.layers.forEach(({ layer }) => map.removeLayer(layer)); e.bundled = null; });
+        lineShapes.clear();
+        if (lastLines.length) drawLineShapes(lastLines);
+        updateStationVisibility();
+        vehicles.forEach(st => { st.root = null; st.body = null; st.angle = null; });
+        if (focus) updateFocusGeometry(true);
     }
 
     function setDelayMode(on) {
@@ -924,7 +969,7 @@
         rafId = requestAnimationFrame(animate);
         if (!visible || !map || document.hidden) return;
         const dtFrame = ts - lastFrame;
-        if (dtFrame < (lowQ ? 100 : 33)) return; // ~30 fps is plenty, 10 fps in low-quality mode
+        if (dtFrame < (lowQ ? 1000 : 33)) return; // ~30 fps; Sparmodus: vehicles hop once per second
         lastFrame = ts;
         const now = performance.now();
         // low quality: only move what is on screen (plus a margin)
@@ -940,7 +985,7 @@
                 const e = k * k * (3 - 2 * k);
                 p = [st.from[0] + (p[0] - st.from[0]) * e, st.from[1] + (p[1] - st.from[1]) * e];
             }
-            const target = st.track.length > 1 ? headingOf(st.track, elapsed) : null;
+            const target = st.track.length > 1 && !lowQ ? headingOf(st.track, elapsed) : null;
             if (target != null) {
                 if (st.angle == null) st.angle = target;
                 else {
@@ -970,7 +1015,7 @@
                 st.body.classList.toggle('stopped', st.angle == null);
             }
         });
-        if (focus && ts - lastFocusTick > (lowQ ? 1500 : 500)) {
+        if (focus && ts - lastFocusTick > (lowQ ? 3000 : 500)) {
             lastFocusTick = ts;
             updateFocusGeometry(false);
         }

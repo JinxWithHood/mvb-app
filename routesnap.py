@@ -405,3 +405,46 @@ def snap(shape, kind, network=None):
                     out.append([round(q[0], 6), round(q[1], 6)])
         out.append(list(b))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Broken HAFAS shapes: a loop between two neighbouring stops
+# ---------------------------------------------------------------------------
+LOOP_FACTOR = 2.5       # shape between two stops this many times longer than their distance …
+LOOP_EXTRA = 700        # … and at least this many metres longer = not the real way
+
+
+def fix_detours(shape, stop_idx, kind, network=None):
+    """HAFAS sometimes draws a tram from one stop to the next via a 5 km loop (e.g. line 9
+    Am Katharinenturm -> Alter Markt over both Elbe bridges). Between two neighbouring stops
+    such a piece is replaced by the shortest track path (tram) or a straight line (bus: the
+    road snapping then routes it). stop_idx: the stops' indexes in `shape` (None = unknown)."""
+    idx = [i for i in (stop_idx or []) if i is not None]
+    if len(shape) < 3 or len(idx) < 2:
+        return shape, 0
+    g = tram_graph(network) if kind == 'tram' else None
+    out, last, fixed = [], 0, 0
+    for a, b in zip(idx, idx[1:]):
+        if b <= a:
+            continue
+        piece = shape[a:b + 1]
+        length = sum(dist(p, q) for p, q in zip(piece, piece[1:]))
+        straight = dist(shape[a], shape[b])
+        if length > max(straight * LOOP_FACTOR, straight + LOOP_EXTRA):
+            repl = None
+            if g is not None:
+                try:
+                    repl = g.path(shape[a], shape[b])
+                except Exception:
+                    repl = None
+            if not repl:
+                repl = [shape[a], shape[b]]
+            out.extend(shape[last:a])
+            out.append(list(shape[a]))
+            out.extend([list(p) for p in repl[1:-1]])
+            last = b
+            fixed += 1
+    if not fixed:
+        return shape, 0
+    out.extend(shape[last:])
+    return out, fixed

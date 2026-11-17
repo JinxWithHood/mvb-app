@@ -116,3 +116,31 @@ class RoadTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# Real NASA shape of tram 9 (direction Reform), 17 Nov 2026: from Am Katharinenturm to Alter Markt
+# HAFAS draws a 5 km loop over both Elbe bridges instead of the 370 m along Breiter Weg.
+LINE9 = [[52.13781, 11.63939], [52.13660, 11.63899], [52.13451, 11.63806],    # 0..2 (2 = Am Katharinenturm)
+         [52.13558, 11.63864], [52.13766, 11.63941], [52.13783, 11.63962], [52.13802, 11.64017],
+         [52.13771, 11.64453], [52.13788, 11.64490], [52.13839, 11.64502], [52.13855, 11.64547],
+         [52.13818, 11.64960], [52.13755, 11.65225], [52.13289, 11.66380], [52.13272, 11.66407],
+         [52.13241, 11.66412], [52.12949, 11.66288], [52.12920, 11.66256], [52.12846, 11.66214],
+         [52.12821, 11.66094], [52.12993, 11.64061], [52.13028, 11.63951], [52.13095, 11.63672],
+         [52.13115, 11.63654], [52.13143, 11.63665], [52.13145, 11.63647]]                     # 25 = Alter Markt
+
+
+class LoopTests(unittest.TestCase):
+    def test_line9_loop_is_cut(self):
+        out, n = rs.fix_detours(LINE9, [2, 25], 'tram', None)
+        self.assertEqual(n, 1)
+        self.assertFalse(any(p[1] > 11.645 for p in out))          # nothing east of the old town
+        self.assertEqual(out[0], LINE9[0])
+        self.assertEqual(out[-1], LINE9[-1])
+
+    def test_normal_shape_untouched(self):
+        shape = [pt(0, 0), pt(200, 0), pt(400, 10), pt(600, 0)]
+        out, n = rs.fix_detours(shape, [0, 3], 'tram', None)
+        self.assertEqual((out, n), (shape, 0))
+
+    def test_unknown_stops(self):
+        self.assertEqual(rs.fix_detours(LINE9, [None, 2, None], 'tram', None)[1], 0)

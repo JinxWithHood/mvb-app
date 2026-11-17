@@ -2964,6 +2964,19 @@ def _snap_shape(shape, vtype, fill_roads=False):
         return shape
 
 
+def _clean_shape(shape, coords, vtype):
+    """HAFAS shape -> loops between neighbouring stops removed, long straight pieces on tracks/roads."""
+    kind = _snap_kind(vtype)
+    if not ROUTESNAP_ON or not kind or len(shape or []) < 2:
+        return shape
+    try:
+        net = _snap_network() if kind == 'tram' else None
+        shape, _ = routesnap.fix_detours(shape, _fit_stops_to_shape(shape, coords), kind, net)
+    except Exception as ex:
+        print(f"[WARN] detour fix: {ex}")
+    return _snap_shape(shape, vtype)
+
+
 def _resnap_trip(trip):
     """Line-shape builder: wait for the road pieces of a bus trip, then refit the stops."""
     if _snap_kind(trip.get('type')) != 'bus' or not ROUTESNAP_ON:
@@ -3088,7 +3101,6 @@ def _fetch_trip(jid, want_raw=False):
     if poly_entry and poly_entry.get('crdEncYX'):
         shape = _decode_hafas_polyline(poly_entry['crdEncYX'])
         pp_refs = poly_entry.get('ppLocRefL') or []
-        shape = _snap_shape(shape, main_type)
 
     stops = []
     for st in journey.get('stopL') or []:
@@ -3123,7 +3135,9 @@ def _fetch_trip(jid, want_raw=False):
     # bits (a second pass or the next circulation), so we do a monotonic best fit:
     # stops must appear in order along the shape, ties go to the earliest point.
     if shape:
-        idxs = _fit_stops_to_shape(shape, [(st['lat'], st['lon']) if st['lat'] else None for st in stops])
+        coords = [(st['lat'], st['lon']) if st['lat'] else None for st in stops]
+        shape = _clean_shape(shape, coords, main_type)
+        idxs = _fit_stops_to_shape(shape, coords)
         for st, ix in zip(stops, idxs):
             st['shapeIdx'] = ix
         valid = [ix for ix in idxs if ix is not None]
@@ -3171,7 +3185,7 @@ def get_trip():
 # -------------------------------------------------------------------
 # Current line shapes (built in the background from live trips)
 # -------------------------------------------------------------------
-LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes_v4.json')   # v4: snapped to tracks/roads
+LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes_v5.json')   # v5: HAFAS loops removed, snapped to tracks/roads
 LINE_SHAPES_MAX_AGE = 12 * 3600
 _line_shapes = {'loaded': False, 'lines': {}}
 _line_shapes_lock = threading.Lock()
