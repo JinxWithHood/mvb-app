@@ -68,9 +68,34 @@ def patched_parse_leg(self, journey, common, departure, arrival, date, jny_type=
         leg.train_num = str(ctx.get('num') or '').strip() or None
     except Exception:
         pass
+    # who runs it (MVB, NJL, BördeBus, DB Regio …)
+    try:
+        prod = prodL[px] if isinstance(px, int) and px < len(prodL) else {}
+        opL = (common or {}).get('opL') or []
+        ox = prod.get('oprX')
+        leg.operator_name = opL[ox].get('name') if isinstance(ox, int) and ox < len(opL) else None
+    except Exception:
+        leg.operator_name = None
     return leg
 
 BaseParseLegHelper.parse_leg = patched_parse_leg
+
+# Connections: also ask for the intermediate stops (pyhafas leaves the pass list off) –
+# the app shows them as "N Zwischenhalte" in the Verbindungssuche.
+try:
+    from pyhafas.profile.base.requests.journeys import BaseJourneysRequest as _BJR
+    _orig_fmt_journeys = _BJR.format_journeys_request
+
+    def _fmt_journeys_with_passlist(self, *args, **kwargs):
+        body = _orig_fmt_journeys(self, *args, **kwargs)
+        try:
+            body['req']['getPasslist'] = True
+        except Exception:
+            pass
+        return body
+    _BJR.format_journeys_request = _fmt_journeys_with_passlist
+except Exception as _ex:  # pragma: no cover
+    print(f"[WARN] pass list patch: {_ex}")
 
 # ---------------------------------------------------------------------------
 # Monkeypatch BaseProfile.format_products_filter to copy defaultProducts
@@ -2891,6 +2916,71 @@ def _hafas_dt(date_str, time_str):
         return None
 
 
+# ---- Linienwege: HAFAS shapes onto real tracks / roads (routesnap.py) ----
+import routesnap
+routesnap.init(os.path.join(CACHE_DIR, 'routesnap_v1.json'))
+ROUTESNAP_ON = os.environ.get('ROUTESNAP', '1') != '0'
+_snap_net = {'mtime': None, 'data': None, 'kv': False}
+
+
+def _snap_network():
+    """Tram track network for snapping (the /api/network cache; never builds it here)."""
+    try:
+        if os.path.exists(NETWORK_CACHE_FILE):
+            mt = os.path.getmtime(NETWORK_CACHE_FILE)
+            if mt != _snap_net['mtime']:
+                with open(NETWORK_CACHE_FILE, 'r', encoding='utf-8') as f:
+                    _snap_net['data'] = json.load(f)
+                _snap_net['mtime'] = mt
+        elif not _snap_net['kv']:
+            _snap_net['kv'] = True
+            remote = _kv_get('network')
+            if remote and remote.get('v') == 2:
+                _snap_net['data'] = remote
+    except Exception as ex:
+        print(f"[WARN] snap network: {ex}")
+    return _snap_net['data']
+
+
+def _snap_kind(vtype):
+    return 'tram' if vtype == 'tram' else ('bus' if vtype in ('bus', 'sev') else None)
+
+
+def _snap_shape(shape, vtype, fill_roads=False):
+    """Long straight HAFAS pieces -> along the tram tracks / the roads. Never makes it worse:
+    on any problem the original shape is returned."""
+    kind = _snap_kind(vtype)
+    if not ROUTESNAP_ON or not kind or len(shape or []) < 2:
+        return shape
+    try:
+        if kind == 'bus':
+            if fill_roads:
+                routesnap.fill_roads(shape)
+            else:
+                routesnap.queue_roads(shape)
+        return routesnap.snap(shape, kind, _snap_network() if kind == 'tram' else None)
+    except Exception as ex:
+        print(f"[WARN] snap: {ex}")
+        return shape
+
+
+def _resnap_trip(trip):
+    """Line-shape builder: wait for the road pieces of a bus trip, then refit the stops."""
+    if _snap_kind(trip.get('type')) != 'bus' or not ROUTESNAP_ON:
+        return trip
+    shape = trip.get('shape') or []
+    new = _snap_shape(shape, trip.get('type'), fill_roads=True)
+    if len(new) == len(shape):
+        return trip
+    trip = dict(trip, shape=[[round(p[0], 6), round(p[1], 6)] for p in new])
+    stops = [dict(st) for st in trip.get('stops') or []]
+    idxs = _fit_stops_to_shape(new, [(st['lat'], st['lon']) if st.get('lat') else None for st in stops])
+    for st, ix in zip(stops, idxs):
+        st['shapeIdx'] = ix
+    trip['stops'] = stops
+    return trip
+
+
 def _fit_stops_to_shape(shape, coords):
     """Monotonic assignment of stops to shape points minimising the total distance."""
     m = len(shape)
@@ -2996,6 +3086,7 @@ def _fetch_trip(jid, want_raw=False):
     if poly_entry and poly_entry.get('crdEncYX'):
         shape = _decode_hafas_polyline(poly_entry['crdEncYX'])
         pp_refs = poly_entry.get('ppLocRefL') or []
+        shape = _snap_shape(shape, main_type)
 
     stops = []
     for st in journey.get('stopL') or []:
@@ -3078,7 +3169,7 @@ def get_trip():
 # -------------------------------------------------------------------
 # Current line shapes (built in the background from live trips)
 # -------------------------------------------------------------------
-LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes_v3.json')
+LINE_SHAPES_FILE = os.path.join(CACHE_DIR, 'line_shapes_v4.json')   # v4: snapped to tracks/roads
 LINE_SHAPES_MAX_AGE = 12 * 3600
 _line_shapes = {'loaded': False, 'lines': {}}
 _line_shapes_lock = threading.Lock()
@@ -3121,7 +3212,7 @@ def _line_shapes_job(jobs):
     try:
         for key, direction, jid, meta in jobs:
             try:
-                trip = _fetch_trip(jid)
+                trip = _resnap_trip(_fetch_trip(jid))
             except Exception as ex:
                 print(f"[WARN] line shape {key}/{direction}: {ex}")
                 continue
@@ -4100,6 +4191,55 @@ def _is_magdeburg(*names):
     return any('magdeburg' in (n or '').lower() for n in names)
 
 
+# Full operator names (HAFAS opL / bahn.de BEFÖRDERER / GTFS agency) -> what the app shows
+_OPERATOR_SHORT = [
+    ('magdeburger verkehrsbetriebe', 'MVB'), ('mvb', 'MVB'),
+    ('jerichower land', 'NJL'), ('njl', 'NJL'),
+    ('börde', 'BördeBus'), ('boerde', 'BördeBus'),
+    ('salzland', 'KVG Salzland'),
+    ('harzer schmalspur', 'HSB'),
+    ('ostdeutsche eisenbahn', 'ODEG'), ('odeg', 'ODEG'),
+    ('abellio', 'Abellio'), ('transdev', 'Transdev'), ('erixx', 'erixx'), ('enno', 'enno'),
+    ('hanseatische eisenbahn', 'HANSeatische Eisenbahn'), ('metronom', 'metronom'),
+    ('hallesche verkehrs', 'HAVAG'), ('havag', 'HAVAG'),
+    ('leipziger verkehrsbetriebe', 'LVB'), ('regionalbus leipzig', 'Regionalbus Leipzig'),
+    ('personenverkehrsgesellschaft burgenlandkreis', 'PVG Burgenlandkreis'),
+    ('kreisverkehrsgesellschaft', 'KVG'), ('stendalbus', 'Stendalbus'), ('altmarkkreis', 'PVGS Altmark'),
+    ('flixbus', 'FlixBus'), ('flixtrain', 'FlixTrain'),
+    ('db fernverkehr', 'DB Fernverkehr'), ('db regio', 'DB Regio'), ('s-bahn mitteldeutschland', 'S-Bahn Mitteldeutschland'),
+    ('deutsche bahn', 'DB'),
+]
+
+
+def _short_operator(name):
+    """'Nahverkehrsgesellschaft Jerichower Land mbH' -> 'NJL'; unknown names without the legal form."""
+    n = (name or '').strip()
+    if not n:
+        return None
+    low = n.lower()
+    for key, short in _OPERATOR_SHORT:
+        if key in low:
+            return short
+    n = re.sub(r'\s*(gmbh(\s*&\s*co\.?\s*kg)?|mbh|ag|kg|e\.\s*v\.|aör|ug)\b\.?', '', n, flags=re.I).strip(' ,-')
+    return n[:40] or None
+
+
+def _is_mvb_line(vtype, label, operator=None, stop_names=()):
+    """Is this tram/bus run by the MVB? A known operator wins; otherwise only Magdeburg trams and
+    the city's 2-digit bus lines count (regional buses like 720 or 613 are NOT MVB)."""
+    if vtype not in ('tram', 'bus', 'sev'):
+        return False
+    short = _short_operator(operator)
+    if short:
+        return short == 'MVB'
+    if not _is_magdeburg(*stop_names):
+        return False
+    if vtype == 'tram':
+        return True
+    digits = re.sub(r'\D', '', label or '')
+    return bool(digits) and len(digits) <= 2 and not re.match(r'^\s*[A-Za-z]{2,}', label or '')
+
+
 def _text_color(color):
     try:
         c = (color or '').lstrip('#')
@@ -4115,11 +4255,11 @@ def _style_line(vm, *stop_names):
     vtype = dbweb.PRODUCT_TYPE.get(gattung, 'bus')
     label = dbweb.line_label(vm)
     operator = dbweb.operator_of(vm)
-    mvb = vtype in ('tram', 'bus') and (_is_magdeburg(*stop_names) or 'magdeburg' in (operator or '').lower())
+    mvb = _is_mvb_line(vtype, label, operator, stop_names)
     if mvb:
         name_for_color = ('Str ' if vtype == 'tram' else 'Bus ') + label
         color = get_line_color(name_for_color, 'MVB')
-        op = operator or 'MVB'
+        op = 'MVB'
         if vtype == 'bus':
             try:
                 if 40 <= int(re.sub(r'\D', '', label) or 0) <= 49:
@@ -4128,7 +4268,7 @@ def _style_line(vm, *stop_names):
                 pass
     else:
         color = GENERIC_PRODUCT_COLORS.get(vtype, '#5F7D95')
-        op = operator
+        op = _short_operator(operator)
         if vtype == 'regional' and ('odeg' in (op or '').lower() or (op or '').lower().startswith('ostdeutsche eisenbahn')):
             color = '#2C6930'
     if vtype == 'tram':
@@ -4522,8 +4662,13 @@ def _nasa_connections(origin_id, dest_id, when, modes, max_changes, min_change):
             ltype = classify_line_type(line_name, mode)
             if ltype == 'walk':
                 ltype = 'bus'
-            color = get_line_color(line_name)
             label = normalize_line_name(line_name) if ltype in ('tram', 'bus', 'sev') else line_name
+            op_raw = getattr(leg, 'operator_name', None)
+            mvb = _is_mvb_line(ltype, label, op_raw, (o_name, d_name, getattr(leg.origin, 'name', ''), getattr(leg.destination, 'name', '')))
+            if ltype in ('tram', 'bus', 'sev') and not mvb:
+                color = GENERIC_PRODUCT_COLORS.get('bus', '#5F7D95') if ltype != 'tram' else get_line_color(line_name)
+            else:
+                color = get_line_color(line_name)
             stops = []
             for so in (getattr(leg, 'stopovers', None) or [])[1:-1]:
                 sp = so.departure or so.arrival
@@ -4536,8 +4681,9 @@ def _nasa_connections(origin_id, dest_id, when, modes, max_changes, min_change):
                 'kind': 'transit', 'src': 'nasa', 'journeyId': getattr(leg, 'id', None),
                 'line': (('Str ' if ltype == 'tram' else 'Bus ') + label) if ltype in ('tram', 'bus', 'sev') else line_name,
                 'label': label, 'type': ltype,
-                'color': color, 'textColor': _text_color(color), 'operator': 'MVB' if ltype in ('tram', 'bus', 'sev') else None,
-                'mvb': ltype in ('tram', 'bus', 'sev'), 'direction': _short_stop(getattr(leg, 'direction', None) or d_name),
+                'color': color, 'textColor': _text_color(color),
+                'operator': 'MVB' if mvb else _short_operator(op_raw),
+                'mvb': mvb, 'direction': _short_stop(getattr(leg, 'direction', None) or d_name),
                 'from': _point(dep_p, dep_r, o_name, getattr(leg, 'departurePlatform', None)),
                 'to': _point(arr_p, arr_r, d_name, getattr(leg, 'arrivalPlatform', None)),
                 'stops': stops, 'durationMin': max(0, dbweb.minutes_between(dep_r or dep_p, arr_r or arr_p) or 0),
@@ -4775,8 +4921,7 @@ def _tr_style(obj, *names):
     vtype = transitous.TYPE_OF.get(obj.get('mode') or '', 'bus')
     lab = transitous.label(obj)
     agency = obj.get('agencyName') or ''
-    mvb = vtype in ('tram', 'bus') and ('magdeburger verkehrsbetriebe' in agency.lower() or
-                                       (_is_magdeburg(*names) and 'magdeburg' in agency.lower()))
+    mvb = _is_mvb_line(vtype, lab, agency, names)
     if mvb:
         color = get_line_color(('Str ' if vtype == 'tram' else 'Bus ') + lab, 'MVB')
         if vtype == 'bus':
@@ -4792,7 +4937,7 @@ def _tr_style(obj, *names):
         color = color or GENERIC_PRODUCT_COLORS.get(vtype, '#5F7D95')
     line = f'Str {lab}' if vtype == 'tram' else (f'Bus {lab}' if vtype in ('bus', 'sev') else lab)
     return {'label': lab, 'line': line, 'type': vtype, 'color': color, 'textColor': _text_color(color),
-            'operator': 'MVB' if mvb else (agency or None), 'mvb': mvb}
+            'operator': 'MVB' if mvb else _short_operator(agency), 'mvb': mvb}
 
 
 def _tr_point(place, kind, realtime_flag=True):

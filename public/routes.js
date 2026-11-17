@@ -528,7 +528,7 @@
             <div class="tl-rail"><span class="tl-seg full" style="--c:${esc(l.color)}"></span></div>
             <div class="tl-body">
                 <div class="tl-line">${lineBadge(l)}<span class="tl-dir">${esc(l.direction || '')}</span></div>
-                <span class="tl-sub">${esc(TYPE_NAMES[l.type] || '')}${l.operator ? ' · ' + esc(l.operator) : ''}</span>
+                <span class="tl-sub">${esc(l.type === 'bus' && l.mvb === false ? 'Regionalbus' : (TYPE_NAMES[l.type] || ''))}${l.operator ? ' · ' + esc(l.operator) : ''}</span>
                 ${stops.length ? `<button type="button" class="tl-stops-toggle" aria-expanded="false">${stops.length} Zwischenhalt${stops.length > 1 ? 'e' : ''}<span aria-hidden="true">▾</span></button>
                 <ol class="tl-stops" hidden>${stops.map(st => `<li${st.cancelled ? ' class="cancelled"' : ''}><span class="ls-time">${esc(st.rt || st.planned || '')}</span><span class="ls-name">${esc(st.name)}</span>${st.delay > 0 ? `<span class="ls-delay">+${st.delay}</span>` : ''}</li>`).join('')}</ol>` : ''}
                 ${noteHtml}
