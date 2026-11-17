@@ -3051,7 +3051,9 @@ def _fetch_trip(jid, want_raw=False):
         return {'journeyKeys': list(j.keys()), 'stop0': (j.get('stopL') or [None])[0],
                 'polyG': j.get('polyG'), 'polyKeys': list((c.get('polyL') or [{}])[0].keys()) if c.get('polyL') else None,
                 'ppLocRefL': ((c.get('polyL') or [{}])[0].get('ppLocRefL') or [])[:5] if c.get('polyL') else None,
-                'nStops': len(j.get('stopL') or [])}
+                'nStops': len(j.get('stopL') or []),
+                # diagnostics: the shape exactly as HAFAS sends it (before snapping)
+                'rawShape': [_decode_hafas_polyline(pl['crdEncYX']) for pl in (c.get('polyL') or []) if pl.get('crdEncYX')]}
 
     journey = res.get('journey', {})
     common = res.get('common', {})
