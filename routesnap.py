@@ -238,8 +238,26 @@ CACHE_MAX = 40000
 RETRY_FAILED = 7 * 86400
 
 
-def init(cache_file):
+_remote = {'get': None, 'put': None, 'last': 0.0}
+REMOTE_EVERY = 600          # seconds between uploads of the cache to the shared store
+
+
+def init(cache_file, remote_get=None, remote_put=None):
+    """remote_get/put: optional shared store (Upstash) so the cache survives server restarts."""
     _cache['file'] = cache_file
+    _remote.update(get=remote_get, put=remote_put)
+
+
+def pack(obj):
+    import base64
+    import zlib
+    return base64.b64encode(zlib.compress(json.dumps(obj, separators=(',', ':')).encode(), 9)).decode()
+
+
+def unpack(text):
+    import base64
+    import zlib
+    return json.loads(zlib.decompress(base64.b64decode(text)).decode())
 
 
 def _load():
@@ -250,6 +268,11 @@ def _load():
         if _cache['file'] and os.path.exists(_cache['file']):
             with open(_cache['file'], 'r', encoding='utf-8') as f:
                 _cache['segs'] = json.load(f).get('segs') or {}
+        elif _remote['get']:
+            packed = _remote['get']()
+            if isinstance(packed, str) and packed:
+                _cache['segs'] = unpack(packed).get('segs') or {}
+                _remote['last'] = time.time()
     except Exception as ex:
         print(f"[WARN] routesnap cache: {ex}")
 
@@ -271,6 +294,12 @@ def save():
         os.replace(tmp, _cache['file'])
     except Exception as ex:
         print(f"[WARN] routesnap save: {ex}")
+    if _remote['put'] and time.time() - _remote['last'] > REMOTE_EVERY:
+        _remote['last'] = time.time()
+        try:
+            _remote['put'](pack(data))
+        except Exception as ex:
+            print(f"[WARN] routesnap upload: {ex}")
 
 
 def _cached(a, b):
@@ -334,18 +363,22 @@ def _route_run(points, session=None):
         _cache['dirty'] = True
 
 
+_net_lock = threading.Lock()     # one road request at a time (gentle on the public server)
+
+
 def fill_roads(shape, session=None, pause=1.1):
     """Ask the road router for every long straight piece of this shape that isn't cached yet."""
     _load()
-    runs = _osrm_runs(_missing(shape))
-    for i, run in enumerate(runs):
-        try:
-            _route_run(run, session)
-        except Exception as ex:
-            print(f"[WARN] routesnap: {ex}")
-            break
-        if i + 1 < len(runs):
-            time.sleep(pause)
+    with _net_lock:
+        runs = _osrm_runs(_missing(shape))    # inside the lock: pieces another thread just got are skipped
+        for i, run in enumerate(runs):
+            try:
+                _route_run(run, session)
+            except Exception as ex:
+                print(f"[WARN] routesnap: {ex}")
+                break
+            if i + 1 < len(runs):
+                time.sleep(pause)
     save()
     return len(runs)
 

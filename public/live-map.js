@@ -1777,6 +1777,7 @@
     };
 
     LiveMap.focusTrip = (id) => focusTrip(id);
+    LiveMap.panTo = (lat, lon, zoom) => { if (map) map.setView([lat, lon], zoom || map.getZoom()); };
     LiveMap.focusLine = (key) => setLineFocus(key);
 
     LiveMap.setTheme = function (t) {

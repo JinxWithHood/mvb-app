@@ -2982,7 +2982,8 @@ def _hafas_dt(date_str, time_str):
 
 # ---- Linienwege: HAFAS shapes onto real tracks / roads (routesnap.py) ----
 import routesnap
-routesnap.init(os.path.join(CACHE_DIR, 'routesnap_v1.json'))
+routesnap.init(os.path.join(CACHE_DIR, 'routesnap_v1.json'),
+               remote_get=lambda: _kv_get('routesnap_v1'), remote_put=lambda packed: _kv_set('routesnap_v1', packed))
 ROUTESNAP_ON = os.environ.get('ROUTESNAP', '1') != '0'
 _snap_net = {'mtime': None, 'data': None, 'kv': False}
 
@@ -3268,9 +3269,16 @@ def _load_line_shapes():
         return
     _line_shapes['loaded'] = True
     try:
+        data = None
         if os.path.exists(LINE_SHAPES_FILE):
             with open(LINE_SHAPES_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+        else:                                       # after a restart: the copy in the shared store
+            packed = _kv_get('line_shapes_v5')
+            if isinstance(packed, str) and packed:
+                data = routesnap.unpack(packed)
+                _line_shapes_kv['last'] = time.time()
+        if data:
             cutoff = time.time() - LINE_SHAPES_MAX_AGE
             for k, v in (data.get('lines') or {}).items():
                 v['shapes'] = {d: s for d, s in (v.get('shapes') or {}).items() if s.get('ts', 0) > cutoff}
@@ -3280,12 +3288,23 @@ def _load_line_shapes():
         print(f"[WARN] line shapes cache: {ex}")
 
 
+_line_shapes_kv = {'last': 0.0}
+
+
 def _save_line_shapes():
     try:
         with open(LINE_SHAPES_FILE, 'w', encoding='utf-8') as f:
             json.dump({'lines': _line_shapes['lines']}, f, ensure_ascii=False)
     except Exception as ex:
         print(f"[WARN] could not save line shapes: {ex}")
+    # copy to the shared store every few minutes, so a restarted server has the routes at once
+    if time.time() - _line_shapes_kv['last'] > 300:
+        _line_shapes_kv['last'] = time.time()
+        try:
+            lines = {k: {kk: vv for kk, vv in v.items() if not kk.startswith('_')} for k, v in _line_shapes['lines'].items()}
+            _kv_set('line_shapes_v5', routesnap.pack({'lines': lines}))
+        except Exception as ex:
+            print(f"[WARN] line shapes upload: {ex}")
 
 
 def _line_shapes_job(jobs):

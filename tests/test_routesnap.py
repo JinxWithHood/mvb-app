@@ -182,3 +182,20 @@ class TurnLoopCloseEndsTests(unittest.TestCase):
         pieces = rs.turn_loops([arrive, leave], net)
         self.assertEqual(len(pieces), 1)
         self.assertTrue(any(rs.dist(q, pt(700, 50)) < 5 for q in pieces[0]))
+
+
+class RemoteStoreTests(unittest.TestCase):
+    def test_cache_survives_a_restart_via_the_shared_store(self):
+        store = {}
+        tmp = tempfile.mkdtemp()
+        rs.init(os.path.join(tmp, 'a.json'), remote_get=lambda: store.get('v'), remote_put=lambda v: store.__setitem__('v', v))
+        rs._cache.update(loaded=True, segs={'k': {'p': [[1, 2], [3, 4]], 'ts': 1}}, dirty=True)
+        rs._remote['last'] = 0
+        rs.save()
+        self.assertIn('v', store)
+        # "restart": no file, empty memory
+        rs.init(os.path.join(tmp, 'b.json'), remote_get=lambda: store.get('v'), remote_put=lambda v: None)
+        rs._cache.update(loaded=False, segs={}, dirty=False)
+        rs._load()
+        self.assertEqual(rs._cache['segs']['k']['p'], [[1, 2], [3, 4]])
+        rs.init(None)
