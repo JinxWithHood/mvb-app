@@ -3392,6 +3392,7 @@ def get_line_shapes():
             'key': key, 'short': v.get('short'), 'line': v.get('line'),
             'type': 'tram' if key.startswith('tram:') else 'bus', 'color': v.get('color'),
         }))
+    jobs.sort(key=lambda j: 0 if j[0].startswith('tram:') else 1)   # trams first: no road router needed, quick
     if jobs and not _line_shapes_worker['running']:
         _line_shapes_worker['running'] = True
         threading.Thread(target=_line_shapes_job, args=(jobs[:40],), daemon=True).start()
