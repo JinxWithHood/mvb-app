@@ -99,7 +99,8 @@ class TrackGraph:
         self.segs.append((u, v))
 
     def _split(self, u, v, q):
-        """Insert a node at q on segment u–v (keeps the old edge, cheap and good enough)."""
+        """Insert a node at q on segment u–v (the old edge goes: a shortcut u–v next to u–m–v
+        would let a search run out along the track and straight back on the same rails)."""
         if dist(q, self.pts[u]) < 1.5:
             return u
         if dist(q, self.pts[v]) < 1.5:
@@ -107,8 +108,12 @@ class TrackGraph:
         m = len(self.pts)
         self.pts.append([q[0], q[1]])
         self.adj.append([])
+        self.adj[u] = [(n, w) for n, w in self.adj[u] if n != v]
+        self.adj[v] = [(n, w) for n, w in self.adj[v] if n != u]
+        self.segs = [sg for sg in self.segs if sg not in ((u, v), (v, u))]
         self._edge(u, m)
         self._edge(m, v)
+        self._index()
         return m
 
     def _cells(self, lat, lon):
@@ -587,6 +592,8 @@ def _loop_from_end(g, e, prev, own_tail, others):
     start = u if ahead_of(u) > ahead_of(w) else w
     if ahead_of(start) <= 0:
         return None
+    if _near_segs([(q[0] + g.pts[start][0]) / 2, (q[1] + g.pts[start][1]) / 2], own_tail, 4):
+        return None                                       # 'ahead' is where it came from: no loop here
     seg_ab = (g.pts[u], g.pts[w])
 
     def blocked(a, b):
@@ -649,8 +656,15 @@ def turn_loops(shapes, network, others=None):
     for sh in others or []:
         other_segs.extend(zip(sh, sh[1:]))
     seen = []
+    def back_point(pts):
+        # direction of travel at the end: from a point ≥ 40 m back (the last metres are often noisy)
+        for p in pts[1:]:
+            if dist(p, pts[0]) >= 40:
+                return p
+        return pts[-1]
+
     for sh in shapes:
-        for e, prev, tail in ((sh[-1], sh[-2], sh[-8:]), (sh[0], sh[1], sh[:8])):
+        for e, prev, tail in ((sh[-1], back_point(sh[::-1]), sh[-8:]), (sh[0], back_point(sh), sh[:8])):
             if any(dist(e, c) < 80 for c in closed) or any(dist(e, c) < 120 for c in seen):
                 continue
             near_other = [(a, b) for a, b in other_segs if min(dist(a, e), dist(b, e)) < 1500]

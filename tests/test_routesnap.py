@@ -226,3 +226,50 @@ class TurnLoopSingleDirectionTests(unittest.TestCase):
     def test_dead_end_has_no_loop(self):
         net = {'generated': 'stub-net-2', 'tracks': [[pt(0, 0), pt(400, 0)]]}
         self.assertEqual(rs.turn_loops([[pt(0, 0), pt(400, 0)]], net), [])
+
+
+class TurnLoopNoisyEndTests(unittest.TestCase):
+    def setUp(self):
+        rs._graph.update(net=None, g=None)
+
+    def test_short_last_step_does_not_turn_it_back(self):
+        loop = [pt(400, 0), pt(430, -30), pt(600, -60), pt(700, 50), pt(600, 140), pt(430, 30), pt(400, 0)]
+        net = {'generated': 'loop-net-4', 'tracks': [[pt(0, 0), pt(400, 0)], loop]}
+        # departs from the stop at the junction; first step only 8 m and slightly sideways
+        only = [pt(398, 6), pt(392, 1), pt(200, 0), pt(0, 0)]
+        pieces = rs.turn_loops([only], net)
+        self.assertEqual(len(pieces), 1)
+        self.assertTrue(any(rs.dist(q, pt(700, 50)) < 5 for q in pieces[0]))
+        self.assertFalse(any(q[1] < pt(380, 0)[1] for q in pieces[0]))     # never back west over the line
+
+
+def _pts(text):
+    return [[float(a), float(b)] for a, b in (p.split(',') for p in text.split())]
+
+
+# OSM tram tracks at the Neustädter See terminus (from /api/network, 17 Nov 2026)
+NSEE_TRACKS = [_pts(t) for t in (
+    "52.17487,11.63593 52.17478,11.63617 52.17469,11.63644 52.17467,11.63662 52.17468,11.63680 52.17471,11.63700 "
+    "52.17480,11.63721 52.17488,11.63730 52.17495,11.63736 52.17507,11.63742 52.17515,11.63742 52.17522,11.63741 "
+    "52.17530,11.63737 52.17537,11.63731 52.17548,11.63714 52.17554,11.63701 52.17557,11.63690 52.17558,11.63672 "
+    "52.17558,11.63648 52.17554,11.63607",
+    "52.17508,11.63420 52.17514,11.63438 52.17521,11.63466 52.17522,11.63484 52.17521,11.63512 52.17516,11.63532 "
+    "52.17509,11.63549 52.17476,11.63614 52.17468,11.63634 52.17463,11.63661 52.17464,11.63682 52.17466,11.63693 "
+    "52.17471,11.63711 52.17482,11.63731 52.17493,11.63742 52.17502,11.63746 52.17510,11.63748 52.17520,11.63747 "
+    "52.17535,11.63739 52.17546,11.63726 52.17557,11.63704",
+    "52.17530,11.63479 52.17520,11.63442 52.17510,11.63415 52.17393,11.63160",
+    "52.17390,11.63164 52.17508,11.63420",
+    "52.17557,11.63704 52.17562,11.63681 52.17562,11.63666 52.17561,11.63651 52.17530,11.63479",
+)]
+
+
+class NeustaedterSeeTests(unittest.TestCase):
+    def setUp(self):
+        rs._graph.update(net=None, g=None)
+
+    def test_line8_departure_gets_the_whole_loop(self):
+        net = {'generated': 'nsee', 'tracks': NSEE_TRACKS}
+        line8 = _pts("52.17551,11.63540 52.17543,11.63545 52.17530,11.63479 52.17516,11.63428 52.17390,11.63154")
+        pieces = rs.turn_loops([line8], net)
+        self.assertEqual(len(pieces), 1, pieces)
+        self.assertGreater(max(p[1] for p in pieces[0]), 11.6372)       # reaches the far (east) end of the loop
