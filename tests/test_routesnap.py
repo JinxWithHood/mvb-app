@@ -167,3 +167,18 @@ class TurnLoopTests(unittest.TestCase):
         a = [pt(0, 0), pt(400, 0)]
         b = [pt(400, 0), pt(0, 0)]
         self.assertEqual(rs.turn_loops([a, b], net), [])
+
+
+class TurnLoopCloseEndsTests(unittest.TestCase):
+    def setUp(self):
+        rs._graph.update(net=None, g=None)
+
+    def test_ends_only_30m_apart_still_go_round(self):
+        # typical terminus: arrival stop and departure stop right next to the junction
+        loop = [pt(400, 0), pt(430, -30), pt(600, -60), pt(700, 50), pt(600, 140), pt(430, 30), pt(400, 0)]
+        net = {'generated': 'loop-net-2', 'tracks': [[pt(0, 0), pt(400, 0)], loop]}
+        arrive = [pt(0, 0), pt(400, 0), pt(430, -30)]
+        leave = [pt(430, 30), pt(400, 0), pt(0, 0)]
+        pieces = rs.turn_loops([arrive, leave], net)
+        self.assertEqual(len(pieces), 1)
+        self.assertTrue(any(rs.dist(q, pt(700, 50)) < 5 for q in pieces[0]))

@@ -471,15 +471,13 @@ def _seg_dist(p, a, b):
 
 
 def _loop_path(g, e, s, own_segs):
-    """Track path e -> s; edges along the line's own shapes cost 25x (except right at e and s)."""
+    """Track path e -> s; edges along the line's own shapes cost 25x (so it goes round the loop)."""
     src = g.project(e, SNAP_RADIUS)
     dst = g.project(s, SNAP_RADIUS)
     if not src or not dst:
         return None
 
     def near_own(p):
-        if dist(p, e) < 35 or dist(p, s) < 35:
-            return False
         return any(_seg_dist(p, a, b) < 9 for a, b in own_segs)
 
     def cost(a, b):
