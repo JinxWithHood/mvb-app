@@ -3397,9 +3397,22 @@ def get_line_shapes():
         threading.Thread(target=_line_shapes_job, args=(jobs[:40],), daemon=True).start()
 
     with _line_shapes_lock:
+        entries = list(_line_shapes['lines'].values())
+    for e in entries:                              # trams: close the turning loops at the ends
+        if e.get('type') != 'tram' or not ROUTESNAP_ON:
+            continue
+        sig = '|'.join(f"{len(s['pts'])}:{s['pts'][0]}:{s['pts'][-1]}" for s in e['shapes'].values() if s.get('pts'))
+        if e.get('_loopSig') != sig:
+            try:
+                e['_loops'] = routesnap.turn_loops([s['pts'] for s in e['shapes'].values()], _snap_network())
+            except Exception as ex:
+                print(f"[WARN] Wendeschleifen {e.get('key')}: {ex}")
+                e['_loops'] = []
+            e['_loopSig'] = sig
+    with _line_shapes_lock:
         out = [{
             'key': e['key'], 'short': e.get('short'), 'line': e.get('line'), 'type': e.get('type'),
-            'color': e.get('color'), 'shapes': [s['pts'] for s in e['shapes'].values()],
+            'color': e.get('color'), 'shapes': [s['pts'] for s in e['shapes'].values()] + (e.get('_loops') or []),
             'changes': [{k: v for k, v in c.items() if k != 'ts'} for c in (e.get('changes') or {}).values()],
             'stops': [[n, ll[0], ll[1]] for n, ll in (e.get('stops') or {}).items()],
         } for e in _line_shapes['lines'].values()]

@@ -144,3 +144,26 @@ class LoopTests(unittest.TestCase):
 
     def test_unknown_stops(self):
         self.assertEqual(rs.fix_detours(LINE9, [None, 2, None], 'tram', None)[1], 0)
+
+
+class TurnLoopTests(unittest.TestCase):
+    def setUp(self):
+        rs._graph.update(net=None, g=None)
+
+    def test_loop_behind_the_terminus_is_drawn(self):
+        loop = [pt(400, 0), pt(500, -50), pt(650, -50), pt(700, 50), pt(600, 120), pt(450, 60), pt(400, 0)]
+        net = {'generated': 'loop-net', 'tracks': [[pt(0, 0), pt(400, 0)], loop]}
+        arrive = [pt(0, 0), pt(400, 0), pt(500, -50)]          # ends at the stop on the loop
+        leave = [pt(450, 60), pt(400, 0), pt(0, 0)]             # starts further round
+        pieces = rs.turn_loops([arrive, leave], net)
+        self.assertEqual(len(pieces), 1)
+        p = pieces[0]
+        self.assertTrue(any(rs.dist(q, pt(700, 50)) < 5 for q in p))       # goes round the far end
+        self.assertLess(rs.dist(p[0], pt(500, -50)), 5)
+        self.assertLess(rs.dist(p[-1], pt(450, 60)), 5)
+
+    def test_no_loop_when_ends_meet(self):
+        net = {'generated': 'stub-net', 'tracks': [[pt(0, 0), pt(400, 0)]]}
+        a = [pt(0, 0), pt(400, 0)]
+        b = [pt(400, 0), pt(0, 0)]
+        self.assertEqual(rs.turn_loops([a, b], net), [])

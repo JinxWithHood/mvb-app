@@ -448,3 +448,126 @@ def fix_detours(shape, stop_idx, kind, network=None):
         return shape, 0
     out.extend(shape[last:])
     return out, fixed
+
+
+# ---------------------------------------------------------------------------
+# Wendeschleifen: the trip shapes end at the last stop, so the turning loop behind it was
+# never drawn. Join "arrives here" with "leaves from here" along the tracks – preferring
+# track the line itself does not use, so the path goes round the loop, not back over the
+# junction.
+# ---------------------------------------------------------------------------
+LOOP_MAX_GAP = 350      # arrival end and departure start at most this far apart
+LOOP_MAX_LEN = 2500     # a loop is never longer than this
+
+
+def _seg_dist(p, a, b):
+    kx = _m_lon(p[0])
+    ax, ay = (a[1] - p[1]) * kx, (a[0] - p[0]) * M_LAT
+    bx, by = (b[1] - p[1]) * kx, (b[0] - p[0]) * M_LAT
+    dx, dy = bx - ax, by - ay
+    ll = dx * dx + dy * dy
+    t = 0.0 if ll == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / ll))
+    return math.hypot(ax + t * dx, ay + t * dy)
+
+
+def _loop_path(g, e, s, own_segs):
+    """Track path e -> s; edges along the line's own shapes cost 25x (except right at e and s)."""
+    src = g.project(e, SNAP_RADIUS)
+    dst = g.project(s, SNAP_RADIUS)
+    if not src or not dst:
+        return None
+
+    def near_own(p):
+        if dist(p, e) < 35 or dist(p, s) < 35:
+            return False
+        return any(_seg_dist(p, a, b) < 9 for a, b in own_segs)
+
+    def cost(a, b):
+        w = dist(a, b)
+        mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+        return w * (25 if near_own(mid) else 1), w
+
+    best, heap = {}, []
+    for _, (u, v, t, q) in src:
+        for n in (u, v):
+            c, w = cost(q, g.pts[n])
+            if c < best.get(n, (math.inf,))[0]:
+                best[n] = (c, None, q, w)
+                heapq.heappush(heap, (c, n))
+    goals = {}
+    for _, (u, v, t, q) in dst:
+        for n in (u, v):
+            c, _ = cost(g.pts[n], q)
+            if c < goals.get(n, (math.inf,))[0]:
+                goals[n] = (c, q)
+    found, done = None, set()
+    while heap:
+        c, n = heapq.heappop(heap)
+        if n in done:
+            continue
+        done.add(n)
+        real = best[n][3]
+        if real > LOOP_MAX_LEN:
+            continue
+        if n in goals and (found is None or c + goals[n][0] < found[0]):
+            found = (c + goals[n][0], n)
+        if found and c > found[0]:
+            break
+        for nb, w in g.adj[n]:
+            nc = c + cost(g.pts[n], g.pts[nb])[0]
+            if nc < best.get(nb, (math.inf,))[0]:
+                best[nb] = (nc, n, None, real + w)
+                heapq.heappush(heap, (nc, nb))
+    if not found:
+        return None
+    n = found[1]
+    out = [goals[n][1]]
+    while n is not None:
+        out.append(g.pts[n])
+        prev = best[n][1]
+        if prev is None:
+            out.append(best[n][2])
+        n = prev
+    out.reverse()
+    return out
+
+
+def turn_loops(shapes, network):
+    """Extra pieces that close the turning loops at the line's ends (trams only)."""
+    g = tram_graph(network)
+    shapes = [s for s in shapes or [] if len(s) >= 2]
+    if g is None or len(shapes) < 2:
+        return []
+    out, done = [], set()
+    for i, a in enumerate(shapes):
+        e = a[-1]
+        best = None
+        for j, b in enumerate(shapes):
+            if i == j:
+                continue
+            d = dist(e, b[0])
+            if d <= LOOP_MAX_GAP and (best is None or d < best[0]):
+                best = (d, b[0])
+        if not best:
+            continue
+        s = best[1]
+        key = (round(e[0], 4), round(e[1], 4), round(s[0], 4), round(s[1], 4))
+        if key in done:
+            continue
+        done.add(key)
+        own = []
+        for sh in shapes:
+            for p, q in zip(sh, sh[1:]):
+                if min(dist(p, e), dist(q, e)) < 1500:
+                    own.append((p, q))
+        try:
+            path = _loop_path(g, e, s, own)
+        except Exception:
+            path = None
+        if not path:
+            continue
+        length = sum(dist(p, q) for p, q in zip(path, path[1:]))
+        if length < max(80, best[0] * 1.6):        # already joined: nothing to close
+            continue
+        out.append([[round(p[0], 6), round(p[1], 6)] for p in path])
+    return out
