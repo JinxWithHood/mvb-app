@@ -2517,6 +2517,58 @@ def _classify_radar_product(prod, operator=''):
 _radar_cache = {'ts': 0, 'data': None}
 
 
+_radar_seg_paths = {}     # (from, to) stop coords -> real path between two neighbouring stops
+
+
+def _radar_seg_path(o, d):
+    key = (round(o[0], 5), round(o[1], 5), round(d[0], 5), round(d[1], 5))
+    if key not in _radar_seg_paths:
+        path = None
+        try:
+            g = routesnap.tram_graph(_snap_network())
+            path = g.path(o, d) if g else None
+        except Exception:
+            path = None
+        if len(_radar_seg_paths) > 3000:
+            _radar_seg_paths.clear()
+        _radar_seg_paths[key] = path or [list(o), list(d)]
+    return _radar_seg_paths[key]
+
+
+def _radar_fix_detour(track, m_sec, proc, f_loc, t_loc, loc_crd):
+    """New track if any frame lies on a detour between its two stops, else None."""
+    if len(track) != len(m_sec):
+        return None
+    bad = False
+    for i, fr in enumerate(track):
+        o, d = loc_crd(f_loc[i]), loc_crd(t_loc[i] if i < len(t_loc) else None)
+        if not o or not d:
+            return None
+        p = [fr[1], fr[2]]
+        direct = routesnap.dist(o, d)
+        if routesnap.dist(o, p) + routesnap.dist(p, d) > max(direct * 2.0, direct + 500):
+            bad = True
+            break
+    if not bad:
+        return None
+    out = []
+    for i, t_ms in enumerate(m_sec):
+        o, d = loc_crd(f_loc[i]), loc_crd(t_loc[i])
+        path = _radar_seg_path(o, d)
+        cum = [0.0]
+        for k in range(1, len(path)):
+            cum.append(cum[-1] + routesnap.dist(path[k - 1], path[k]))
+        target = max(0.0, min(1.0, (proc[i] or 0) / 100.0)) * cum[-1]
+        k = 1
+        while k < len(path) - 1 and cum[k] < target:
+            k += 1
+        seg = max(1e-6, cum[k] - cum[k - 1])
+        f = max(0.0, min(1.0, (target - cum[k - 1]) / seg))
+        a, b = path[k - 1], path[k]
+        out.append([int(t_ms), round(a[0] + (b[0] - a[0]) * f, 6), round(a[1] + (b[1] - a[1]) * f, 6)])
+    return out
+
+
 @app.route('/api/radar')
 def get_radar():
     """Live vehicle positions in Magdeburg via HAFAS JourneyGeoPos (with short animation tracks)."""
@@ -2665,6 +2717,18 @@ def get_radar():
                         pt = [o[0] + (d[0] - o[0]) * frac, o[1] + (d[1] - o[1]) * frac]
                     if pt:
                         track.append([int(t_ms), round(pt[0], 6), round(pt[1], 6)])
+
+            # HAFAS computes positions along its own (sometimes broken) polyline: a tram can then
+            # appear on a 5 km loop it never drives (e.g. line 10 at the Nordbrückenzug). Positions
+            # off the way between the two stops are recomputed on the real track between them.
+            if vtype == 'tram' and track and m_sec and len(proc) == len(m_sec) and len(f_loc) == len(m_sec):
+                try:
+                    fixed = _radar_fix_detour(track, m_sec, proc, f_loc, t_loc, loc_crd)
+                    if fixed:
+                        track = fixed
+                        lat, lon = track[0][1], track[0][2]
+                except Exception as ex:
+                    print(f"[WARN] radar detour fix: {ex}")
 
             # Next stop + current delay from the stop list.
             # HAFAS sometimes reports nonsense for a single stop (e.g. +39 at one stop, -1 at the next),

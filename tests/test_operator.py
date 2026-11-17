@@ -1,5 +1,6 @@
 """Who runs a line: MVB vs. regional bus companies (Bus 720 to Loburg is NJL, not MVB)."""
 import unittest
+from unittest import mock
 
 import helpers  # noqa: F401
 import backend as b
@@ -27,3 +28,24 @@ class OperatorTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RadarDetourTests(unittest.TestCase):
+    """Tram 10 shown at the Nordbrückenzug: HAFAS places it on its own broken loop."""
+    KATH, MARKT = [52.13451, 11.63806], [52.13145, 11.63647]
+
+    def loc(self, ix):
+        return {0: self.KATH, 1: self.MARKT}.get(ix)
+
+    def test_position_on_loop_is_moved_between_the_stops(self):
+        track = [[0, 52.13818, 11.64960], [5000, 52.13755, 11.65225]]     # on the loop, ~1 km east
+        with mock.patch.object(b, '_snap_network', return_value=None):
+            out = b._radar_fix_detour(track, [0, 5000], [40, 45], [0, 0], [1, 1], self.loc)
+        self.assertIsNotNone(out)
+        for t, lat, lon in out:
+            self.assertTrue(11.6364 <= lon <= 11.6381 and 52.1314 <= lat <= 52.1346, (lat, lon))
+        self.assertLess(out[0][1], self.KATH[0])                            # 40 % of the way south
+
+    def test_normal_positions_untouched(self):
+        track = [[0, 52.1330, 11.6372]]
+        self.assertIsNone(b._radar_fix_detour(track, [0], [50], [0], [1], self.loc))
