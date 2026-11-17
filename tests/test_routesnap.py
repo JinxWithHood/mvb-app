@@ -199,3 +199,30 @@ class RemoteStoreTests(unittest.TestCase):
         rs._load()
         self.assertEqual(rs._cache['segs']['k']['p'], [[1, 2], [3, 4]])
         rs.init(None)
+
+
+class TurnLoopSingleDirectionTests(unittest.TestCase):
+    """Line 8 at Neustädter See: only one direction known so far – the loop must still be drawn."""
+    def setUp(self):
+        rs._graph.update(net=None, g=None)
+
+    LOOP = [pt(400, 0), pt(430, -30), pt(600, -60), pt(700, 50), pt(600, 140), pt(430, 30), pt(400, 0)]
+
+    def test_one_direction_gets_its_loop(self):
+        net = {'generated': 'loop-net-3', 'tracks': [[pt(0, 0), pt(400, 0)], self.LOOP]}
+        only = [pt(0, 0), pt(200, 0), pt(400, 0)]                 # arrives at the junction, ends
+        pieces = rs.turn_loops([only], net)
+        self.assertEqual(len(pieces), 1)
+        self.assertTrue(any(rs.dist(q, pt(700, 50)) < 5 for q in pieces[0]))
+        length = sum(rs.dist(a, b) for a, b in zip(pieces[0], pieces[0][1:]))
+        self.assertGreater(length, 400)
+
+    def test_city_block_driven_by_other_lines_is_not_a_loop(self):
+        net = {'generated': 'block-net', 'tracks': [[pt(0, 0), pt(400, 0)], self.LOOP]}
+        only = [pt(0, 0), pt(200, 0), pt(400, 0)]
+        other_line = self.LOOP[1:-1]                               # another line runs round this "block"
+        self.assertEqual(rs.turn_loops([only], net, others=[other_line]), [])
+
+    def test_dead_end_has_no_loop(self):
+        net = {'generated': 'stub-net-2', 'tracks': [[pt(0, 0), pt(400, 0)]]}
+        self.assertEqual(rs.turn_loops([[pt(0, 0), pt(400, 0)]], net), [])

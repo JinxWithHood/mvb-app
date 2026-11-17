@@ -563,12 +563,108 @@ def _loop_path(g, e, s, own_segs):
     return out
 
 
-def turn_loops(shapes, network):
-    """Extra pieces that close the turning loops at the line's ends (trams only)."""
+def _near_segs(p, segs, limit):
+    return any(_seg_dist(p, a, b) < limit for a, b in segs)
+
+
+def _loop_from_end(g, e, prev, own_tail, others):
+    """A turning loop behind the line's end e (arriving from prev), found in the track graph
+    alone: leave e forwards, never straight back over the incoming track, and come back to
+    within ~60 m of e. Rejected when it is really a city block that other lines drive through."""
+    hits = g.project(e, SNAP_RADIUS)
+    if not hits:
+        return None
+    _, (u, w, t, q) = hits[0]
+    kx = _m_lon(e[0])
+    vx, vy = (e[1] - prev[1]) * kx, (e[0] - prev[0]) * M_LAT
+    if math.hypot(vx, vy) < 1:
+        return None
+
+    def ahead_of(n):
+        p = g.pts[n]
+        return (p[1] - q[1]) * kx * vx + (p[0] - q[0]) * M_LAT * vy
+
+    start = u if ahead_of(u) > ahead_of(w) else w
+    if ahead_of(start) <= 0:
+        return None
+    seg_ab = (g.pts[u], g.pts[w])
+
+    def blocked(a, b):
+        mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+        if _seg_dist(mid, *seg_ab) < 1.0 and _seg_dist(a, *seg_ab) < 1.0 and _seg_dist(b, *seg_ab) < 1.0:
+            return True                                   # the incoming segment itself
+        return _near_segs(mid, own_tail, 4)               # straight back on the track it came in on
+
+    best = {start: (dist(q, g.pts[start]), None)}
+    heap = [(best[start][0], start)]
+    done, found = set(), None
+    while heap:
+        c, n = heapq.heappop(heap)
+        if n in done:
+            continue
+        done.add(n)
+        if c > LOOP_SEARCH_MAX:
+            break
+        if c >= 120 and dist(g.pts[n], e) <= 60:
+            found = n
+            break
+        for nb, wgt in g.adj[n]:
+            if blocked(g.pts[n], g.pts[nb]):
+                continue
+            nc = c + wgt
+            if nc < best.get(nb, (math.inf,))[0]:
+                best[nb] = (nc, n)
+                heapq.heappush(heap, (nc, nb))
+    if found is None:
+        return None
+    path, n = [], found
+    while n is not None:
+        path.append(g.pts[n])
+        n = best[n][1]
+    path.append(q)
+    path.reverse()
+    total = sum(dist(a, b) for a, b in zip(path, path[1:]))
+    if others:
+        shared = sum(dist(a, b) for a, b in zip(path, path[1:])
+                     if _near_segs([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], others, 9))
+        if shared > 0.4 * total:
+            return None                                   # a block other lines run round: not a loop
+    return path
+
+
+LOOP_SEARCH_MAX = 1200
+
+
+def turn_loops(shapes, network, others=None):
+    """Extra pieces that close the turning loops at the line's ends (trams only).
+    others: shapes of the other tram lines (to tell a turning loop from a city block)."""
     g = tram_graph(network)
     shapes = [s for s in shapes or [] if len(s) >= 2]
-    if g is None or len(shapes) < 2:
+    if g is None or not shapes:
         return []
+    out = turn_loops_paired(g, shapes) if len(shapes) >= 2 else []
+    # ends that the pairing didn't close (one direction only, or no partner nearby)
+    closed = [p for piece in out for p in (piece[0], piece[-1])]
+    other_segs = []
+    for sh in others or []:
+        other_segs.extend(zip(sh, sh[1:]))
+    seen = []
+    for sh in shapes:
+        for e, prev, tail in ((sh[-1], sh[-2], sh[-8:]), (sh[0], sh[1], sh[:8])):
+            if any(dist(e, c) < 80 for c in closed) or any(dist(e, c) < 120 for c in seen):
+                continue
+            near_other = [(a, b) for a, b in other_segs if min(dist(a, e), dist(b, e)) < 1500]
+            try:
+                path = _loop_from_end(g, e, prev, list(zip(tail, tail[1:])), near_other)
+            except Exception:
+                path = None
+            if path:
+                seen.append(e)
+                out.append([[round(p[0], 6), round(p[1], 6)] for p in path])
+    return out
+
+
+def turn_loops_paired(g, shapes):
     out, done = [], set()
     for i, a in enumerate(shapes):
         e = a[-1]

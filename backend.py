@@ -3418,13 +3418,16 @@ def get_line_shapes():
 
     with _line_shapes_lock:
         entries = list(_line_shapes['lines'].values())
-    for e in entries:                              # trams: close the turning loops at the ends
-        if e.get('type') != 'tram' or not ROUTESNAP_ON:
-            continue
-        sig = '|'.join(f"{len(s['pts'])}:{s['pts'][0]}:{s['pts'][-1]}" for s in e['shapes'].values() if s.get('pts'))
+    trams = [e for e in entries if e.get('type') == 'tram']
+    all_sig = '|'.join(sorted(f"{e.get('key')}:{len(e['shapes'])}" for e in trams))
+    for e in trams:                                # trams: close the turning loops at the ends
+        if not ROUTESNAP_ON:
+            break
+        sig = all_sig + '#' + '|'.join(f"{len(s['pts'])}:{s['pts'][0]}:{s['pts'][-1]}" for s in e['shapes'].values() if s.get('pts'))
         if e.get('_loopSig') != sig:
+            others = [s['pts'] for o in trams if o is not e for s in o['shapes'].values() if s.get('pts')]
             try:
-                e['_loops'] = routesnap.turn_loops([s['pts'] for s in e['shapes'].values()], _snap_network())
+                e['_loops'] = routesnap.turn_loops([s['pts'] for s in e['shapes'].values()], _snap_network(), others)
             except Exception as ex:
                 print(f"[WARN] Wendeschleifen {e.get('key')}: {ex}")
                 e['_loops'] = []
