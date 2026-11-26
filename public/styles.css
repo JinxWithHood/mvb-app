@@ -9413,3 +9413,18 @@ body.settings-open { overflow: hidden; }
 .dz-ico { color: #d97706; font-size: 1.1rem; }
 .dz-pop.crit .dz-ico { color: #dc2626; }
 .dz-badge { background: var(--lc); color: #fff; font-weight: 800; font-size: .78rem; border-radius: 6px; padding: 1px 7px; }
+
+/* ===== Ultra-Kartoffelmodus (Sparmodus lange drücken) ===== */
+.map-quality-toggle { position: relative; overflow: hidden; -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
+.map-quality-toggle::after { content: ''; position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: #f59e0b; }
+.map-quality-toggle.pressing::after { width: 100%; transition: width .65s linear !important; }
+.map-quality-toggle.ultra { background: #8a5a2b !important; color: #fff !important; border-color: #6b4420 !important; }
+.map-quality-toggle.ultra .map-toggle-label::before { content: '🥔 '; }
+.map-ulq .live-map, .map-ulq .leaflet-container { background: #e9ede9 !important; }
+#app.theme-dark .map-ulq .live-map, #app.theme-dark .map-ulq .leaflet-container { background: #121815 !important; }
+.map-ulq .mv-label { display: none !important; }
+.map-ulq .mv.mv-focus .mv-label { display: block !important; }
+.map-ulq .mv-body { width: 10px !important; height: 10px !important; border-width: 1px !important; border-radius: 50% !important; }
+.map-ulq .mv-body::after, .map-ulq .mv-body::before { display: none !important; }
+.map-ulq .dz-label { display: none !important; }
+.map-ulq .hst-h { box-shadow: none !important; }

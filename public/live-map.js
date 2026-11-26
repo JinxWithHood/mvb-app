@@ -72,7 +72,11 @@
     // phones/tablets and weak computers (≤ 4 GB RAM or ≤ 2 CPU cores) start in the Sparmodus
     const autoLow = isTouchDevice() || (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
         (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2);
-    let lowQ = qualityPref === 'low' || (qualityPref === 'auto' && autoLow);
+    // Ultra-Kartoffelmodus (long press on "Sparmodus"): no map tiles, no rails, vehicles as dots that
+    // only move every few seconds, radar every 30 s – for really weak devices
+    let ultraQ = qualityPref === 'ultra';
+    let lowQ = ultraQ || qualityPref === 'low' || (qualityPref === 'auto' && autoLow);
+    const ULTRA_POLL_MS = 30000;
 
     // ---------------------------------------------------------
     // Helpers
@@ -256,7 +260,8 @@
             maxZoom: 19,
             maxNativeZoom: 16,
             attribution: 'Karte © Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende · Gleise © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Linienwege & Live-Daten: INSA/HAFAS',
-        }).addTo(map);
+        });
+        if (!ultraQ) tileLayer.addTo(map);
 
         const pane = (name, z, pointer) => {
             map.createPane(name);
@@ -313,6 +318,7 @@
     }
 
     function drawTracks(data) {
+        if (ultraQ) return;
         let segs = data.tracks || [];
         if (!segs.length) segs = (data.lines || []).flatMap(l => l.segs || []);
         if (!segs.length) return;
@@ -457,24 +463,30 @@
 
     function openStopBoard(popup, st) {
         closeStopBoard();
-        const root = popup.getElement && popup.getElement();
-        const box = root && root.querySelector('.hst-deps');
-        const all = root && root.querySelector('.hst-all');
-        if (!box) return;
+        // always look the nodes up again: never call popup.update() here – Leaflet would rebuild the
+        // content from the template and throw the loaded departures away
+        const part = (sel) => { const r = popup.getElement && popup.getElement(); return r && r.querySelector(sel); };
+        if (!part('.hst-deps')) return;
         let station = null;
         const load = async () => {
             try {
                 station = station || await stopIdFor(st);
-                const res = await fetch(`${opts.apiBase}/departures?station_id=${encodeURIComponent(station.id)}&duration=45`);
+                const res = await fetch(`${opts.apiBase}/departures?station_id=${encodeURIComponent(station.id)}&duration=60`);
                 const data = await res.json();
-                if (!box.isConnected) return;
+                if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+                const box = part('.hst-deps');
+                if (!box || !popup.isOpen()) return;
                 renderStopBoard(box, Array.isArray(data) ? data : data.departures);
+                const all = part('.hst-all');
                 if (all) all.hidden = false;
-                popup.update();
+                if (popup._updateLayout) { popup._updateLayout(); popup._updatePosition(); }
             } catch (e) {
-                if (box.isConnected) box.innerHTML = '<div class="hst-dep-wait">Abfahrten gerade nicht verfügbar.</div>';
+                console.warn('Haltestellen-Abfahrten:', e);
+                const box = part('.hst-deps');
+                if (box && popup.isOpen()) box.innerHTML = '<div class="hst-dep-wait">Abfahrten gerade nicht verfügbar.</div>';
             }
         };
+        const all = part('.hst-all');
         if (all) all.onclick = () => {
             if (!station || !window.MVBApp) return;
             window.MVBApp.setCurrentStation({ id: station.id, name: station.name });
@@ -565,7 +577,7 @@
             if (!pts.length && anchor) pts.push(anchor);
             pts.forEach(ll => {
                 L.marker(ll, { pane: 'disruptions', keyboard: true, title: it.title || 'Störung',
-                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: [13, 13] }) })
+                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: (it.stops || []).length ? [-8, 22] : [13, 13] }) })
                     .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
             });
         });
@@ -918,20 +930,36 @@
         return true;
     }
 
-    function setLowQuality(on, byUser) {
+    function setLowQuality(on, byUser, ultra) {
+        const wasUltra = ultraQ;
+        ultraQ = !!on && !!ultra;
         lowQ = !!on;
         if (byUser) {
             // back to "auto" when the choice matches what the device would get anyway
-            qualityPref = lowQ === !!autoLow ? 'auto' : (lowQ ? 'low' : 'high');
+            qualityPref = ultraQ ? 'ultra' : (lowQ === !!autoLow ? 'auto' : (lowQ ? 'low' : 'high'));
             try { localStorage.setItem('map_quality', qualityPref); } catch (e) { /* ignore */ }
         }
         const shell = document.querySelector('.map-shell');
-        if (shell) shell.classList.toggle('map-lq', lowQ);
+        if (shell) { shell.classList.toggle('map-lq', lowQ); shell.classList.toggle('map-ulq', ultraQ); }
         const btn = $('mapQualityBtn');
         if (btn) {
             btn.classList.toggle('active', lowQ);
+            btn.classList.toggle('ultra', ultraQ);
             btn.setAttribute('aria-pressed', lowQ ? 'true' : 'false');
-            btn.title = lowQ ? 'Sparmodus an – flüssiger auf Handy & Tablet' : 'Sparmodus aus – volle Effekte';
+            const label = btn.querySelector('.map-toggle-label');
+            if (label) label.textContent = ultraQ ? 'Kartoffel' : 'Sparmodus';
+            btn.title = (ultraQ ? 'Ultra-Kartoffelmodus an – nur das Nötigste'
+                : lowQ ? 'Sparmodus an – flüssiger auf Handy & Tablet' : 'Sparmodus aus – volle Effekte')
+                + ' · lange drücken: Ultra-Kartoffelmodus';
+        }
+        if (map && tileLayer) {
+            if (ultraQ && map.hasLayer(tileLayer)) map.removeLayer(tileLayer);
+            if (!ultraQ && !map.hasLayer(tileLayer)) tileLayer.addTo(map);
+            map.options.inertia = !ultraQ;
+        }
+        if (wasUltra !== ultraQ && pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = setInterval(() => { if (!document.hidden) poll(); }, ultraQ ? ULTRA_POLL_MS : POLL_MS);
         }
         if (map) {
             map.options.fadeAnimation = !lowQ;
@@ -943,7 +971,9 @@
             redrawForQuality();
         }
         if (byUser && window.MVBApp && window.MVBApp.showToast) {
-            window.MVBApp.showToast(lowQ
+            window.MVBApp.showToast(ultraQ
+                ? '🥔 Ultra-Kartoffelmodus: keine Kartenbilder, Fahrzeuge als Punkte, Update alle 30 Sekunden. Nochmal lange drücken zum Beenden.'
+                : lowQ
                 ? 'Sparmodus an: schlichte Linien, Fahrzeuge springen 1× pro Sekunde, keine Effekte.'
                 : 'Volle Qualität an.', 'info');
         }
@@ -1127,7 +1157,7 @@
         rafId = requestAnimationFrame(animate);
         if (!visible || !map || document.hidden) return;
         const dtFrame = ts - lastFrame;
-        if (dtFrame < (lowQ ? 1000 : 33)) return; // ~30 fps; Sparmodus: vehicles hop once per second
+        if (dtFrame < (ultraQ ? 4000 : lowQ ? 1000 : 33)) return; // ~30 fps; Sparmodus: vehicles hop once per second
         lastFrame = ts;
         const now = performance.now();
         // low quality: only move what is on screen (plus a margin)
@@ -1199,7 +1229,7 @@
     async function startPolling() {
         stopPolling();
         await poll();
-        pollTimer = setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
+        pollTimer = setInterval(() => { if (!document.hidden) poll(); }, ultraQ ? ULTRA_POLL_MS : POLL_MS);
         if (!rafId) rafId = requestAnimationFrame(animate);
         loadLineShapes();
         loadDisruptions();
@@ -1813,8 +1843,30 @@
         const dBtn = $('mapDelayBtn');
         if (dBtn) dBtn.addEventListener('click', () => setDelayMode(!delayMode));
         const qBtn = $('mapQualityBtn');
-        if (qBtn) qBtn.addEventListener('click', () => setLowQuality(!lowQ, true));
-        setLowQuality(lowQ, false);
+        if (qBtn) {
+            // tap: Sparmodus on/off · long press: Ultra-Kartoffelmodus on/off
+            let pressTimer = null, longDone = false;
+            const cancel = () => { clearTimeout(pressTimer); pressTimer = null; qBtn.classList.remove('pressing'); };
+            qBtn.addEventListener('pointerdown', (e) => {
+                if (e.button > 0) return;
+                longDone = false;
+                qBtn.classList.add('pressing');
+                pressTimer = setTimeout(() => {
+                    pressTimer = null;
+                    longDone = true;
+                    qBtn.classList.remove('pressing');
+                    if (navigator.vibrate) { try { navigator.vibrate(30); } catch (err) { /* ignore */ } }
+                    setLowQuality(true, true, !ultraQ);
+                }, 650);
+            });
+            ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => qBtn.addEventListener(ev, cancel));
+            qBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+            qBtn.addEventListener('click', (e) => {
+                if (longDone) { longDone = false; e.preventDefault(); return; }
+                setLowQuality(!lowQ, true);
+            });
+        }
+        setLowQuality(lowQ, false, ultraQ);
         setDelayMode(delayMode);
         const legend = $('mapLegend');
         if (legend) enableLegendDrag(legend);
@@ -1908,7 +1960,7 @@
     // ---------------------------------------------------------
     LiveMap.init = function (o) {
         opts = o || {};
-        setLowQuality(lowQ, false);
+        setLowQuality(lowQ, false, ultraQ);
     };
     LiveMap.isLowQuality = () => lowQ;
 

@@ -1188,7 +1188,22 @@ def stop_id_for_map():
         if found is None and cands:
             found = cands[0][0]                     # closest stop
     except Exception as ex:
-        print(f"[WARN] stop-id: {ex}")
+        print(f"[WARN] stop-id nearby: {ex}")
+    if found is None and name:
+        # fallback: search by name (the nearby request isn't always answered)
+        try:
+            clean = re.sub(r'\s*\((tram|bus|tram/bus)\)', '', name, flags=re.I).strip()
+            q = clean if clean.lower().startswith('magdeburg') else f'Magdeburg, {clean}'
+            locs = [l for l in (nasa_client.locations(q) or []) if getattr(l, 'id', None)]
+            best = None
+            for l in locs:
+                n = re.sub(r'(tram|bus|trambus)$', '', _norm_station(l.name))
+                if target and n and (n == target or target in n or n in target):
+                    best = l
+                    break
+            found = best or (locs[0] if locs else None)
+        except Exception as ex:
+            print(f"[WARN] stop-id search: {ex}")
     if found is None:
         return jsonify({'error': 'Haltestelle nicht gefunden'}), 404
     out = {'id': str(found.id), 'name': found.name}

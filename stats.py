@@ -13,7 +13,7 @@ import threading
 import time
 
 H_MIN, H_MAX = -5, 15          # histogram: delay in whole minutes, clipped to this range
-ON_TIME = (-1, 3)              # punctual: at most 1 min early and at most 3 min late
+ON_TIME = (-2, 3)              # punctual: -2 … +3 min; early from 3 min early on, late from 4 min late
 KEEP_DAYS = 366
 TYPES = ('tram', 'bus', 'sev')
 

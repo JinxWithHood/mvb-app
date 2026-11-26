@@ -66,6 +66,13 @@ class CollectTests(unittest.TestCase):
         self.assertTrue(d['done'])
         self.assertEqual(d['days'], ['2026-11-26'])
 
+    def test_early_only_from_three_minutes(self):
+        h = [0] * (stats.H_MAX - stats.H_MIN + 1)
+        for d in (-2, -3, -4, 3, 4):
+            h[d - stats.H_MIN] += 1
+        m = stats._metrics(h)
+        self.assertEqual((m['early'], m['onTime'], m['late']), (40.0, 40.0, 20.0))   # -3/-4 early, -2/+3 on time, +4 late
+
     def test_done_words(self):
         self.assertTrue(stats._looks_done({'title': 'ERLEDIGT: Störung Linie 1'}))
         self.assertFalse(stats._looks_done({'title': 'Störung Linie 1', 'desc': 'Die Bahnen fahren eine Umleitung.'}))
@@ -95,6 +102,18 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(old['to'], old['earliest'])                   # clamped to one year back
             self.assertEqual(c.get('/api/stats?date=gestern').status_code, 400)
             self.assertEqual(c.get('/api/stats?range=decade').status_code, 400)
+
+    def test_stop_id_falls_back_to_name_search(self):
+        class Loc:
+            def __init__(self, i, n): self.id, self.name = i, n
+        fake = mock.Mock()
+        fake.nearby.side_effect = RuntimeError('nearby not answered')
+        fake.locations.return_value = [Loc('1', 'Magdeburg, Alter Markt'), Loc('2', 'Magdeburg, Hasselbachplatz')]
+        self.b._stop_id_cache.clear()
+        with mock.patch.object(self.b, 'nasa_client', fake):
+            d = self.b.app.test_client().get('/api/stop-id?name=Hasselbachplatz&lat=52.12&lon=11.63').get_json()
+        self.assertEqual(d['id'], '2')
+        self.assertIn('Hasselbachplatz', fake.locations.call_args[0][0])
 
     def test_line_keys_from_message(self):
         known = {'tram:2', 'tram:9', 'bus:52', 'tram:4'}

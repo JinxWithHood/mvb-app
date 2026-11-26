@@ -1,6 +1,6 @@
 /* Magdeburg Mobil — Pünktlichkeits-Statistik (unter der Live-Karte)
    Daten: /api/stats?range=day|week|month|year&date=YYYY-MM-DD (der Server misst jede Minute
-   an jedem Halt; pünktlich = höchstens 1 Min zu früh und 3 Min zu spät). */
+   an jedem Halt; zu früh ab 3 Min, verspätet ab 4 Min). */
 (function () {
     'use strict';
 
@@ -25,7 +25,7 @@
           <header class="st-head">
             <div>
               <h2 id="statsTitle">Pünktlichkeit der Linien</h2>
-              <p class="st-sub">Gemessen an jedem Halt · pünktlich heißt höchstens 1 Min zu früh und höchstens 3 Min zu spät</p>
+              <p class="st-sub">Gemessen an jedem Halt · zu früh ab 3 Min vor Plan, verspätet ab 4 Min nach Plan</p>
             </div>
           </header>
           <div class="st-controls">
@@ -70,7 +70,7 @@
         try {
             const res = await fetch(`${apiBase()}/stats?range=${state.range}&date=${state.date}`, { cache: 'no-store' });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Fehler');
+            if (!res.ok || data.error || !data.to) throw new Error(data.error || 'Fehler');
             state.data = data;
             state.date = data.to;
             render();
@@ -184,7 +184,7 @@
                 ${tile('Pünktlich', `${fmt(t.onTime)} %`, null, 'on')}
                 ${tile('Ø Abweichung', `${sign(t.avg)} Min`, t.avgLate != null ? `verspätete Halte: Ø +${fmt(t.avgLate)} Min` : null)}
                 ${tile('Verspätet', `${fmt(t.late)} %`, 'mehr als 3 Min', 'late')}
-                ${tile('Zu früh', `${fmt(t.early)} %`, 'mehr als 1 Min', 'early')}
+                ${tile('Zu früh', `${fmt(t.early)} %`, '3 Min oder mehr', 'early')}
                 ${tile('Halte gemessen', t.n.toLocaleString('de-DE'), since)}
               </div>`;
             if (d.range !== 'day') html += trendSvg(d.trend || []);
