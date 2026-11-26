@@ -533,15 +533,28 @@
         if (visible) disr.timer = setTimeout(loadDisruptions, 180000);
     }
 
+    // a picture for what happened (shown until the message says "erledigt")
+    const DZ_ICONS = {
+        accident: { label: 'Unfall', svg: '<path d="M5 15l1.6-4.6A2 2 0 0 1 8.5 9h7a2 2 0 0 1 1.9 1.4L19 15v3.5a.5.5 0 0 1-.5.5H17a.5.5 0 0 1-.5-.5V17h-9v1.5a.5.5 0 0 1-.5.5H5.5a.5.5 0 0 1-.5-.5z" fill="currentColor"/><circle cx="8" cy="14.2" r="1.1" fill="#dc2626"/><circle cx="16" cy="14.2" r="1.1" fill="#dc2626"/><path d="M12 1.5l1 2.6 2.4-1.2-.9 2.6 2.7.3-2.2 1.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M12 1.5l-1 2.6-2.4-1.2.9 2.6-2.7.3 2.2 1.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>' },
+        construction: { label: 'Baustelle', svg: '<path d="M10.2 3h3.6l4.4 14H5.8z" fill="currentColor"/><path d="M8.6 9h6.8M7.4 13h9.2" stroke="#f59e0b" stroke-width="2"/><rect x="3.5" y="17" width="17" height="3" rx="1" fill="currentColor"/>' },
+        police: { label: 'Einsatz', svg: '<path d="M7 17v-5a5 5 0 0 1 10 0v5z" fill="currentColor"/><rect x="5" y="17" width="14" height="3" rx="1" fill="currentColor"/><path d="M12 2v2.5M4.2 5.2l1.8 1.8M19.8 5.2L18 7M2 11h2.5M19.5 11H22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' },
+        event: { label: 'Veranstaltung', svg: '<path d="M5 21V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4h12l-3 4 3 4H6z" fill="currentColor"/>' },
+        defect: { label: 'Technische Störung', svg: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.1-.4-.4-2.1z" fill="currentColor"/>' },
+        weather: { label: 'Unwetter', svg: '<path d="M7 15a4 4 0 0 1-.4-8 5.5 5.5 0 0 1 10.6 1.6A3.3 3.3 0 0 1 17 15z" fill="currentColor"/><path d="M11.5 13l-2 4h3l-2 4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/>' },
+        other: { label: 'Störung', svg: '<path d="M12 3L2.5 20h19z" fill="currentColor"/><path d="M12 9.5v5" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.3" fill="#f59e0b"/>' },
+    };
+    const dzIcon = (kind) => DZ_ICONS[kind] || DZ_ICONS.other;
+    const dzSvg = (kind, size) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${dzIcon(kind).svg}</svg>`;
+
     function disrPopup(it, lineKeys) {
         const badges = lineKeys.map(k => {
             const m = lineShapes.get(k)?.meta;
-            const short = m ? m.short : k.split(':')[1];
+            const short = m ? m.short : k.split(':').slice(1).join(':');
             const col = m ? m.color : '#64748b';
             return `<span class="dz-badge" style="--lc:${escapeHtml(col)}">${escapeHtml(short)}</span>`;
         }).join('');
         const text = (it.desc || '').trim();
-        return `<div class="dz-pop${it.critical ? ' crit' : ''}"><div class="dz-head"><span class="dz-ico" aria-hidden="true">⚠</span>${badges}</div>`
+        return `<div class="dz-pop dz-${escapeHtml(it.kind || 'other')}${it.critical ? ' crit' : ''}"><div class="dz-head"><span class="dz-kind">${dzSvg(it.kind, 16)}${escapeHtml(dzIcon(it.kind).label)}</span>${badges}</div>`
             + `<strong>${escapeHtml(it.title || 'Störung')}</strong>${it.time ? `<small>${escapeHtml(it.time)}</small>` : ''}`
             + (text ? `<p>${escapeHtml(text.length > 360 ? text.slice(0, 357) + '…' : text)}</p>` : '') + '</div>';
     }
@@ -577,7 +590,8 @@
             (it.pins || []).forEach(p => {
                 const atStop = stopNames.has(p.label);
                 L.marker([p.lat, p.lon], { pane: 'disruptions', keyboard: true, title: `${it.title || 'Störung'}${p.label ? ' – ' + p.label : ''}`,
-                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: atStop ? [-8, 22] : [13, 13] }) })
+                    icon: L.divIcon({ className: `dz-pin dz-${it.kind || 'other'}${it.critical ? ' crit' : ''}`, html: `<span>${dzSvg(it.kind, lowQ ? 18 : 22)}</span>`,
+                        iconSize: [34, 34], iconAnchor: atStop ? [-8, 30] : [17, 17] }) })
                     .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
             });
         });

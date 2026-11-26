@@ -5391,13 +5391,15 @@ _disr_map_cache = {'ts': 0, 'data': None}
 def _disr_line_keys(item, known):
     """'Linie 2', 'Linien 2 und 9', 'Bus 52' -> ['tram:2', 'tram:9', 'bus:52'] (only lines we know)."""
     text = ' '.join(item.get('lines') or []) + ' ' + (item.get('title') or '')
-    nums = re.findall(r'(?<![\d:.,])(\d{1,3})(?![\d:.,])', ' '.join(re.findall(r'(?:Linie[n]?|Tram|Straßenbahn|Bus(?:linie)?|SEV)[^.;:]*', text, flags=re.I)))
+    parts = ' '.join(re.findall(r'(?:Nacht)?(?:Linie[n]?|Tram|Straßenbahn|Bus(?:linie)?|SEV)[^.;:]*', text, flags=re.I))
+    nums = re.findall(r'(?<![\w:.,])(N\s?\d{1,2}|\d{1,3})(?![\d:.,])', parts)   # night lines keep their N
     keys = []
     for n in nums:
-        for k in (f'tram:{n}', f'bus:{n}'):
-            if k in known and k not in keys:
-                keys.append(k)
-                break
+        n = n.replace(' ', '')
+        k = next((k for k in (f'tram:{n}', f'bus:{n}') if k in known), None)
+        k = k or (f'bus:{n}' if n.startswith('N') else f'line:{n}')   # not on the map right now: still show it
+        if k not in keys:
+            keys.append(k)
     return keys
 
 
@@ -5565,6 +5567,51 @@ def _clip_near(polys, anchors, limit):
     return out
 
 
+_DISR_KINDS = (
+    ('accident', re.compile(r'unfall|kollision|zusammensto', re.I)),
+    ('police', re.compile(r'polizei|feuerwehr|rettungs|notarzt|personenschaden|bombenentschärfung|evakuierung', re.I)),
+    ('construction', re.compile(r'bauarbeit|baustelle|bauma|gleisbau|gleisarbeit|straßenbau|sanierung|kanalarbeit', re.I)),
+    ('event', re.compile(r'veranstaltung|demonstration|\bdemo\b|versammlung|\blauf\b|stadtlauf|marathon|umzug|festival|weihnachtsmarkt|konzert|heimspiel|fußballspiel', re.I)),
+    ('defect', re.compile(r'fahrzeugstörung|technische|weichenstörung|fahrleitung|signalstörung|stromausfall|defekt', re.I)),
+    ('weather', re.compile(r'unwetter|\bsturm|glätte|schneefall|\bschnee\b|\beis\b|hochwasser|umgestürzte|\bbaum\b', re.I)),
+)
+
+
+def _disruption_kind(item):
+    text = f"{item.get('title') or ''} {item.get('desc') or ''}"
+    title = item.get('title') or ''
+    for kind, rx in _DISR_KINDS:                      # what the title says wins over the body
+        if rx.search(title):
+            return kind
+    for kind, rx in _DISR_KINDS:
+        if rx.search(text):
+            return kind
+    return 'other'
+
+
+def _cluster_pieces(geo, ref_pts=None, gap=350):
+    """Nominatim can return the same street name elsewhere in the area: keep only one connected
+    stretch – the one closest to the affected lines (or the longest)."""
+    if len(geo) <= 1:
+        return geo
+    def gdist(a, b):
+        return min(routesnap.dist(p, q) for p in a[::3] + a[-1:] for q in b[::3] + b[-1:])
+    if ref_pts:
+        start = min(geo, key=lambda g: min(routesnap.dist(p, q) for p in g[::3] + g[-1:] for q in ref_pts))
+    else:
+        start = max(geo, key=lambda g: (_poly_len(g), len(g)))
+    keep, rest = [start], [g for g in geo if g is not start]
+    grew = True
+    while grew and rest:
+        grew = False
+        for g in list(rest):
+            if any(gdist(g, k) < gap for k in keep):
+                keep.append(g)
+                rest.remove(g)
+                grew = True
+    return keep
+
+
 def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry):
     """lines, the closed street(s), the diversion near it, mentioned stops and pins for one message."""
     keys = _disr_line_keys(item, lines)
@@ -5585,6 +5632,8 @@ def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry
         geo = [g for g in (geocode(street) or []) if g]
         if not geo:
             continue
+        line_pts = [p for k in keys for sh in (lines.get(k, {}).get('shapes') or {}).values() for p in (sh.get('pts') or [])[::8]]
+        geo = _cluster_pieces(geo, line_pts or stop_pts or None)
         # "zwischen A und B": only that part of the street (A/B = cross streets or stops)
         bounds = []
         for other, r in found:
@@ -5595,19 +5644,23 @@ def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry
                     near = min(pts, key=lambda p: min(routesnap.dist(q, p) for q in og))
                     if min(routesnap.dist(q, near) for q in og) < 800:
                         bounds.append(near)
-        bounds += [p for p in stop_pts if any(routesnap.dist(p, q) < 400 for g in geo for q in g[::4] + g[-1:])]
         if len(bounds) >= 2:
             a_, b_ = max(((x, y) for i, x in enumerate(bounds) for y in bounds[i + 1:]), key=lambda xy: routesnap.dist(*xy))
             span = routesnap.dist(a_, b_)
-            geo = [[p for p in g if routesnap.dist(p, a_) + routesnap.dist(p, b_) <= span * 1.1 + 120] for g in geo]
+            geo = [[p for p in g if routesnap.dist(p, a_) + routesnap.dist(p, b_) <= span * 1.1 + 200] for g in geo]
             geo = [g for g in geo if g]
         elif bounds or (sum(_poly_len(g) for g in geo) > 2000 and stop_pts):
             geo = _clip_near(geo, bounds or stop_pts, 500)    # a long street: only around the named place
         if not geo:
             continue
+        if closed:                                   # a second closed street only when it is right next to the first
+            first = [p for run in next(iter(closed.values())) for p in run]
+            if not any(_near_any(p, first, 800) for g in geo for p in g[::3] + g[-1:]):
+                continue
         closed[street] = [_thin(g, 15) if len(g) > 1 else g for g in geo]
-        longest = max(geo, key=lambda g: (_poly_len(g), len(g)))
-        pins.append({'lat': longest[len(longest) // 2][0], 'lon': longest[len(longest) // 2][1], 'label': street})
+        if not pins:                                 # one pin per message: in the middle of the closed street
+            longest = max(geo, key=lambda g: (_poly_len(g), len(g)))
+            pins.append({'lat': longest[len(longest) // 2][0], 'lon': longest[len(longest) // 2][1], 'label': street})
 
     anchors = [p for runs in closed.values() for run in runs for p in run[::3] + run[-1:]]
     if anchors and stop_pts:                              # stops far away from the problem are just mentioned in passing
@@ -5617,7 +5670,7 @@ def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry
     detour = {}
     if anchors:
         for k in keys:
-            live = [s['pts'] for d, s in (lines[k].get('shapes') or {}).items() if s.get('pts')]
+            live = [s['pts'] for d, s in (lines.get(k, {}).get('shapes') or {}).items() if s.get('pts')]
             regular = net_lines.get(k.split(':', 1)[1]) if k.startswith('tram:') else None
             if not live or not regular:
                 continue
@@ -5626,9 +5679,9 @@ def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry
             runs = [r for r in runs if any(_near_any(p, anchors, 1200) for p in r)]
             if runs:
                 detour[k] = runs
-    if not pins:
-        pins = [{'lat': n['lat'], 'lon': n['lon'], 'label': n['name']} for n in named]
-    return keys, detour, closed, named[:12], pins[:8]
+    if not pins and named:                           # no street: one pin at the first stop the message names
+        pins = [{'lat': named[0]['lat'], 'lon': named[0]['lon'], 'label': named[0]['name']}]
+    return keys, detour, closed, named[:12], pins[:1]
 
 
 def _build_disruption_map(items):
@@ -5652,7 +5705,7 @@ def _build_disruption_map(items):
             except Exception as ex:
                 print(f"[WARN] Störung auf Karte: {ex}")
         out.append({'id': it.get('id'), 'title': it.get('title'), 'desc': (it.get('desc') or '')[:600], 'time': it.get('time'),
-                    'critical': bool(it.get('critical')), 'done': done, 'lines': keys,
+                    'critical': bool(it.get('critical')), 'done': done, 'lines': keys, 'kind': _disruption_kind(it),
                     'detour': detour, 'closed': closed, 'stops': named, 'pins': pins})
     now = time.time()
     data = {'items': out, 'ts': int(now * 1000)}

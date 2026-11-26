@@ -9401,18 +9401,29 @@ body.settings-open { overflow: hidden; }
 
 /* ===== Störungen auf der Live-Karte ===== */
 .dz-pin { display: flex; align-items: center; justify-content: center; }
-.dz-pin span { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #f59e0b; color: #111; font-weight: 900; font-size: 14px; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); }
-.dz-pin.crit span { background: #dc2626; color: #fff; }
-.map-lq .dz-pin span { box-shadow: none; }
+.dz-pin span { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: #f59e0b; color: #111; border: 2.5px solid #fff; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+.dz-pin.dz-accident span { background: #dc2626; color: #fff; animation: dz-pulse 1.6s ease-out infinite; }
+.dz-pin.dz-police span { background: #2563eb; color: #fff; }
+.dz-pin.dz-construction span { background: #f59e0b; color: #111; }
+.dz-pin.dz-event span { background: #7c3aed; color: #fff; }
+.dz-pin.dz-defect span { background: #475569; color: #fff; }
+.dz-pin.dz-weather span { background: #0891b2; color: #fff; }
+.dz-pin.crit:not(.dz-accident) span { box-shadow: 0 0 0 3px #dc2626, 0 3px 10px rgba(0,0,0,.4); }
+@keyframes dz-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,.6), 0 3px 10px rgba(0,0,0,.4); } 100% { box-shadow: 0 0 0 14px rgba(220,38,38,0), 0 3px 10px rgba(0,0,0,.4); } }
+.map-lq .dz-pin span { box-shadow: none; animation: none; width: 28px; height: 28px; }
+.dz-kind { display: inline-flex; align-items: center; gap: 4px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 2px 7px 2px 5px; border-radius: 6px; background: #f59e0b; color: #111; }
+.dz-accident .dz-kind { background: #dc2626; color: #fff; }
+.dz-police .dz-kind { background: #2563eb; color: #fff; }
+.dz-event .dz-kind { background: #7c3aed; color: #fff; }
+.dz-defect .dz-kind { background: #475569; color: #fff; }
+.dz-weather .dz-kind { background: #0891b2; color: #fff; }
 .dz-label { background: none; border: 0; }
 .dz-label span { display: inline-block; transform: translate(-50%, -150%); background: #f59e0b; color: #111; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 6px; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
 .dz-pop strong { display: block; font-size: .95rem; margin: 4px 0 2px; }
 .dz-pop small { color: #6b7280; }
 .dz-pop p { margin: 6px 0 0; font-size: .84rem; line-height: 1.4; white-space: pre-line; }
 .dz-head { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
-.dz-ico { color: #d97706; font-size: 1.1rem; }
-.dz-pop.crit .dz-ico { color: #dc2626; }
-.dz-badge { background: var(--lc); color: #fff; font-weight: 800; font-size: .78rem; border-radius: 6px; padding: 1px 7px; }
+.dz-badge { background: var(--lc, #64748b); color: #fff; font-weight: 800; font-size: .78rem; border-radius: 6px; padding: 1px 7px; }
 
 /* ===== Ultra-Kartoffelmodus (Sparmodus lange drücken) ===== */
 .map-quality-toggle { position: relative; overflow: hidden; -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }

@@ -121,7 +121,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(f({'lines': ['Linie 2', 'Linie 9']}, known), ['tram:2', 'tram:9'])
         self.assertEqual(f({'title': 'Linien 2 und 9: Umleitung', 'lines': []}, known), ['tram:2', 'tram:9'])
         self.assertEqual(f({'lines': ['Buslinie 52']}, known), ['bus:52'])
-        self.assertEqual(f({'lines': ['Linie 99']}, known), [])
+        self.assertEqual(f({'lines': ['Linie 99']}, known), ['line:99'])            # not on the map now: still named
+        # night lines keep their N (and are not mixed up with tram 1 / 4)
+        self.assertEqual(f({'lines': ['Linie N1', 'Linie N4']}, known | {'bus:N4'}), ['bus:N1', 'bus:N4'])
+        self.assertEqual(f({'title': 'Nachtlinie N 8: Umleitung', 'lines': []}, known), ['bus:N8'])
+
+    def test_kind_of_disruption(self):
+        k = self.b._disruption_kind
+        self.assertEqual(k({'title': 'Unfall an der Haltestelle Hasselbachplatz', 'desc': 'Die Polizei ist vor Ort.'}), 'accident')
+        self.assertEqual(k({'title': 'Sperrung Maybachstraße', 'desc': 'Wegen Bauarbeiten …'}), 'construction')
+        self.assertEqual(k({'title': 'Polizeieinsatz', 'desc': ''}), 'police')
+        self.assertEqual(k({'title': 'Linie 4', 'desc': 'Wegen einer Fahrzeugstörung kommt es zu Verspätungen.'}), 'defect')
+        self.assertEqual(k({'title': 'Hinweis', 'desc': 'Bitte beachten.'}), 'other')
+
+    def test_one_pin_and_one_place_per_message(self):
+        b = self.b
+        # the same street name twice (Magdeburg and a village nearby) + five stops in the text
+        here = [[52.130, 11.612], [52.130, 11.618]]
+        elsewhere = [[52.050, 11.700], [52.050, 11.706]]
+        stops = {f'Halt {i}': (52.13 + i * 0.001, 11.615) for i in range(5)}
+        live = [[52.129, 11.600], [52.129, 11.630]]
+        keys, detour, closed, named, pins = b._disruption_geometry(
+            {'lines': ['Linie 2'], 'title': 'Unfall Musterweg', 'desc': 'Der Musterweg ist gesperrt. Ersatzhaltestellen: ' + ', '.join(stops) + '.'},
+            {'tram:2': {'shapes': {'A': {'pts': live}}}}, {}, stops, geocode=lambda st: [here, elsewhere] if st == 'Musterweg' else None)
+        self.assertEqual(len(pins), 1)
+        self.assertEqual(closed['Musterweg'], [here])
 
     def test_diversion_geometry(self):
         b = self.b
