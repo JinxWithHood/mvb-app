@@ -5336,6 +5336,7 @@ def _stats_loop():
                     _disruptions_changed(_stats_worker['disr'], items)
                     _stats.observe_disruptions(items, now)
                     _stats_worker['disr'], _stats_worker['disr_ts'] = items, now
+                    _build_disruption_map(items)
                 except Exception as ex:
                     print(f"[WARN] Statistik (Störungen): {ex}")
             last_disr = now
@@ -5426,22 +5427,147 @@ def _thin(pts, step=25):
     return out
 
 
-def _disruption_geometry(item, lines, net_lines, stops):
-    keys = _disr_line_keys(item, lines)
-    detour, closed = {}, {}
-    for k in keys:
-        live = [s['pts'] for d, s in (lines[k].get('shapes') or {}).items() if s.get('pts')]
-        regular = net_lines.get(k.split(':', 1)[1]) if k.startswith('tram:') else None
-        if not live or not regular:
+# --- where is it? The Verkehrsmelder only has text ("Wegen Bauarbeiten in der Maybachstraße …"),
+# so the closed street is looked up in OpenStreetMap (Nominatim, cached for good) and only what lies
+# around that place is drawn – never a guess from comparing whole routes.
+_STREET_SUFFIX = r'(?:straße|strasse|str\.|weg|allee|platz|ring|damm|ufer|brücke|chaussee|gasse|markt|bogen|tor|tunnel)'
+_STREET_WORD = r'(?:Straße|Strasse|Str\.|Weg|Allee|Platz|Ring|Damm|Ufer|Brücke|Chaussee|Tunnel)'
+_STREET_RE = re.compile(
+    r'\b[A-ZÄÖÜ][\wäöüß]*(?:-[\wäöüß]+)+-' + _STREET_WORD +                       # Otto-von-Guericke-Straße
+    r'|\b[A-ZÄÖÜ][a-zäöüß]{2,}' + _STREET_SUFFIX + r'(?![a-zäöüß])' +             # Maybachstraße, Damaschkeplatz
+    r'|\b(?:[A-ZÄÖÜ][a-zäöüß]+(?:er|en|es|e)\s){1,2}' + _STREET_WORD + r'(?![a-zäöüß])')   # Breiter Weg, Halberstädter Straße
+_NOT_A_STREET = {'die', 'der', 'das', 'diese', 'dieser', 'eine', 'ein', 'wegen', 'bauarbeiten', 'arbeiten', 'gleisarbeiten',
+                 'baustellen', 'umleitungen', 'haltestellen', 'linien', 'bahnen', 'busse', 'neue', 'neuen', 'gesamte', 'gesamten',
+                 'betroffene', 'gesperrte', 'gesperrten', 'genannte', 'genannten', 'unsere', 'unseren'}
+_CLOSED_WORDS = re.compile(r'sperr|baustelle|bauarbeit|unfall|havarie|blockier|nicht befahrbar|nicht passierbar|'
+                           r'polizeieinsatz|feuerwehr|gleisarbeit|fahrleitung|weichen|veranstaltung|demonstration|einsatz', re.I)
+_DETOUR_BEFORE = re.compile(r'(über|via|durch|entlang|umgeleitet|umleitung|ersatzweise|stattdessen)\b[^.]{0,25}$', re.I)
+_BOUND_BEFORE = re.compile(r'(zwischen|bis|ab|höhe|kreuzung|einmündung|ecke|abzweig)\b[^.,]{0,30}$|zwischen\b[^.,]{0,60}\bund\s+(?:der|dem|den|die)?\s*$', re.I)
+_MD_VIEWBOX = '11.50,52.22,11.78,52.03'
+_geo_cache = {}
+_geo_lock = threading.Lock()
+_geo_last = {'t': 0.0}
+
+
+def _norm_street(st):
+    st = re.sub(r'\s+', ' ', st).strip()
+    words = st.split(' ')
+    while len(words) > 1 and words[0].lower() in _NOT_A_STREET:
+        words = words[1:]
+    # "im Breiten Weg" / "am Neuen Weg" -> Breiter Weg / Neuer Weg (masculine dative)
+    if len(words) > 1 and words[-1] in ('Weg', 'Ring', 'Damm', 'Platz', 'Tunnel'):
+        words = [w[:-2] + 'er' if w.endswith('en') and w[0].isupper() else w for w in words[:-1]] + words[-1:]
+    st = ' '.join(words)
+    return re.sub(r'Str\.$', 'Straße', st).replace('strasse', 'straße').replace('str.', 'straße')
+
+
+def _streets_in(item):
+    """[(street, role)] – role 'closed' (where the problem is), 'bound' (start/end of the closed part),
+    'detour' (named as the way round) or 'other'."""
+    title = item.get('title') or ''
+    text = f"{title}. {item.get('desc') or ''}"
+    rank = {'closed': 3, 'bound': 2, 'detour': 1, 'other': 0}
+    out = {}
+    for sent in re.split(r'(?<=[.!?;:])\s+|\n+', text):
+        for m in _STREET_RE.finditer(sent):
+            st = _norm_street(m.group(0))
+            if len(st) < 6 or not re.search(r'[A-ZÄÖÜ]', st[:1]):
+                continue
+            before = sent[:m.start()]
+            if _DETOUR_BEFORE.search(before):
+                role = 'detour'
+            elif _BOUND_BEFORE.search(before):
+                role = 'bound'
+            elif _CLOSED_WORDS.search(sent) or st in title:
+                role = 'closed'
+            else:
+                role = 'other'
+            if rank[role] > rank.get(out.get(st), -1):
+                out[st] = role
+    # "Bauarbeiten Halberstädter Straße" + "Halberstädter Straße" -> keep the plain street name
+    for st in list(out):
+        if any(o != st and st.endswith(' ' + o) for o in out):
+            role = out.pop(st)
+            short = next(o for o in out if st.endswith(' ' + o))
+            if rank[role] > rank[out[short]]:
+                out[short] = role
+    return list(out.items())
+
+
+def _street_geometry(street):
+    """Polylines [[lat, lon], …] of a Magdeburg street from OpenStreetMap (Nominatim), cached forever."""
+    key = street.lower()
+    if key in _geo_cache:
+        return _geo_cache[key]
+    stored = _kv_get(f'geo:{key}')
+    if isinstance(stored, dict) and 'lines' in stored:
+        _geo_cache[key] = stored['lines']
+        return stored['lines']
+    with _geo_lock:                                       # Nominatim: at most one request per second
+        wait = 1.1 - (time.time() - _geo_last['t'])
+        if wait > 0:
+            time.sleep(wait)
+        _geo_last['t'] = time.time()
+        try:
+            r = requests.get('https://nominatim.openstreetmap.org/search', timeout=10,
+                             headers={'User-Agent': 'MagdeburgMobil/1.0 (https://mvb-app.onrender.com)', 'Accept-Language': 'de'},
+                             params={'street': street, 'city': 'Magdeburg', 'country': 'Deutschland', 'format': 'jsonv2',
+                                     'polygon_geojson': 1, 'polygon_threshold': 0.00003, 'limit': 12, 'dedupe': 0,
+                                     'viewbox': _MD_VIEWBOX, 'bounded': 1})
+            r.raise_for_status()
+            found = r.json()
+        except Exception as ex:
+            print(f"[WARN] Straße '{street}' nicht gefunden: {ex}")
+            return None                                   # try again next time
+    lines = []
+    for res in found or []:
+        if res.get('category') not in (None, 'highway', 'railway', 'place') and res.get('class') not in ('highway', 'railway', 'place'):
             continue
-        reg_segs = [(a, b) for seg in regular for a, b in zip(seg, seg[1:])]
-        live_segs = [(a, b) for sh in live for a, b in zip(sh, sh[1:])]
-        d = [_thin(r) for sh in live for r in _runs_away(_thin(sh), reg_segs)]
-        c = [_thin(r) for seg in regular for r in _runs_away(_thin(seg), live_segs)]
-        if d:
-            detour[k] = d
-        if c:
-            closed[k] = c
+        g = res.get('geojson') or {}
+        if g.get('type') == 'LineString':
+            parts = [g['coordinates']]
+        elif g.get('type') == 'MultiLineString':
+            parts = g['coordinates']
+        elif g.get('type') == 'Polygon':                  # squares: their outline
+            parts = [g['coordinates'][0]]
+        else:
+            try:
+                parts = [[[float(res['lon']), float(res['lat'])]]]
+            except (KeyError, TypeError, ValueError):
+                continue
+        for part in parts:
+            lines.append([[round(c[1], 6), round(c[0], 6)] for c in part])
+    _geo_cache[key] = lines
+    _kv_set(f'geo:{key}', {'lines': lines})
+    return lines
+
+
+def _poly_len(pl):
+    return sum(routesnap.dist(a, b) for a, b in zip(pl, pl[1:]))
+
+
+def _near_any(p, anchors, limit):
+    return any(routesnap.dist(p, a) < limit for a in anchors)
+
+
+def _clip_near(polys, anchors, limit):
+    out = []
+    for pl in polys:
+        cur = []
+        for p in pl:
+            if _near_any(p, anchors, limit):
+                cur.append(p)
+            elif cur:
+                out.append(cur)
+                cur = []
+        if cur:
+            out.append(cur)
+    return out
+
+
+def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry):
+    """lines, the closed street(s), the diversion near it, mentioned stops and pins for one message."""
+    keys = _disr_line_keys(item, lines)
     text = f"{item.get('title') or ''} {item.get('desc') or ''}"
     low = re.sub(r'\s+', ' ', text.lower())
     named = []
@@ -5449,19 +5575,63 @@ def _disruption_geometry(item, lines, net_lines, stops):
         nm = re.sub(r'\s*\((tram|bus|tram/bus)\)$', '', nm, flags=re.I)
         if len(nm) >= 5 and nm.lower() in low and all(n['name'] != nm for n in named):
             named.append({'name': nm, 'lat': lat, 'lon': lon})
-    return keys, detour, closed, named[:12]
+    stop_pts = [[n['lat'], n['lon']] for n in named]
+
+    closed, pins = {}, []
+    found = _streets_in(item)
+    for street, role in found:
+        if role != 'closed':
+            continue
+        geo = [g for g in (geocode(street) or []) if g]
+        if not geo:
+            continue
+        # "zwischen A und B": only that part of the street (A/B = cross streets or stops)
+        bounds = []
+        for other, r in found:
+            if r == 'bound':
+                og = [p for g in (geocode(other) or []) for p in g]
+                if og:
+                    pts = [p for g in geo for p in g]          # the point of our street closest to the cross street
+                    near = min(pts, key=lambda p: min(routesnap.dist(q, p) for q in og))
+                    if min(routesnap.dist(q, near) for q in og) < 800:
+                        bounds.append(near)
+        bounds += [p for p in stop_pts if any(routesnap.dist(p, q) < 400 for g in geo for q in g[::4] + g[-1:])]
+        if len(bounds) >= 2:
+            a_, b_ = max(((x, y) for i, x in enumerate(bounds) for y in bounds[i + 1:]), key=lambda xy: routesnap.dist(*xy))
+            span = routesnap.dist(a_, b_)
+            geo = [[p for p in g if routesnap.dist(p, a_) + routesnap.dist(p, b_) <= span * 1.1 + 120] for g in geo]
+            geo = [g for g in geo if g]
+        elif bounds or (sum(_poly_len(g) for g in geo) > 2000 and stop_pts):
+            geo = _clip_near(geo, bounds or stop_pts, 500)    # a long street: only around the named place
+        if not geo:
+            continue
+        closed[street] = [_thin(g, 15) if len(g) > 1 else g for g in geo]
+        longest = max(geo, key=lambda g: (_poly_len(g), len(g)))
+        pins.append({'lat': longest[len(longest) // 2][0], 'lon': longest[len(longest) // 2][1], 'label': street})
+
+    anchors = [p for runs in closed.values() for run in runs for p in run[::3] + run[-1:]]
+    if anchors and stop_pts:                              # stops far away from the problem are just mentioned in passing
+        named = [n for n in named if _near_any([n['lat'], n['lon']], anchors, 1500)]
+    anchors += [[n['lat'], n['lon']] for n in named]
+
+    detour = {}
+    if anchors:
+        for k in keys:
+            live = [s['pts'] for d, s in (lines[k].get('shapes') or {}).items() if s.get('pts')]
+            regular = net_lines.get(k.split(':', 1)[1]) if k.startswith('tram:') else None
+            if not live or not regular:
+                continue
+            reg_segs = [(a, b) for seg in regular for a, b in zip(seg, seg[1:])]
+            runs = [_thin(r) for sh in live for r in _runs_away(_thin(sh), reg_segs)]
+            runs = [r for r in runs if any(_near_any(p, anchors, 1200) for p in r)]
+            if runs:
+                detour[k] = runs
+    if not pins:
+        pins = [{'lat': n['lat'], 'lon': n['lon'], 'label': n['name']} for n in named]
+    return keys, detour, closed, named[:12], pins[:8]
 
 
-@app.route('/api/disruptions/map')
-def api_disruptions_map():
-    now = time.time()
-    if _disr_map_cache['data'] and now - _disr_map_cache['ts'] < 120:
-        return jsonify(_disr_map_cache['data'])
-    items = _stats_worker['disr'] if now - _stats_worker['disr_ts'] < 600 else None
-    if items is None:
-        items = _current_disruptions()
-    if items is None:
-        return jsonify({'error': 'Verkehrsmelder nicht erreichbar', 'items': []}), 502
+def _build_disruption_map(items):
     _load_line_shapes()
     with _line_shapes_lock:
         lines = {k: v for k, v in _line_shapes['lines'].items()}
@@ -5475,17 +5645,32 @@ def api_disruptions_map():
     out = []
     for it in items:
         done = _stats_mod._looks_done(it)
-        try:
-            keys, detour, closed, named = _disruption_geometry(it, lines, net_lines, stops) if not done else ([], {}, {}, [])
-        except Exception as ex:
-            print(f"[WARN] Störung auf Karte: {ex}")
-            keys, detour, closed, named = [], {}, {}, []
+        keys, detour, closed, named, pins = [], {}, {}, [], []
+        if not done:
+            try:
+                keys, detour, closed, named, pins = _disruption_geometry(it, lines, net_lines, stops)
+            except Exception as ex:
+                print(f"[WARN] Störung auf Karte: {ex}")
         out.append({'id': it.get('id'), 'title': it.get('title'), 'desc': (it.get('desc') or '')[:600], 'time': it.get('time'),
                     'critical': bool(it.get('critical')), 'done': done, 'lines': keys,
-                    'detour': detour, 'closed': closed, 'stops': named})
+                    'detour': detour, 'closed': closed, 'stops': named, 'pins': pins})
+    now = time.time()
     data = {'items': out, 'ts': int(now * 1000)}
     _disr_map_cache.update(ts=now, data=data)
-    return jsonify(data)
+    return data
+
+
+@app.route('/api/disruptions/map')
+def api_disruptions_map():
+    now = time.time()
+    if _disr_map_cache['data'] and now - _disr_map_cache['ts'] < 400:
+        return jsonify(_disr_map_cache['data'])
+    items = _stats_worker['disr'] if now - _stats_worker['disr_ts'] < 600 else None
+    if items is None:
+        items = _current_disruptions()
+    if items is None:
+        return jsonify({'error': 'Verkehrsmelder nicht erreichbar', 'items': []}), 502
+    return jsonify(_build_disruption_map(items))
 
 
 def _disruptions_changed(before, after):

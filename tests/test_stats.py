@@ -128,14 +128,48 @@ class ApiTests(unittest.TestCase):
         regular = [[[52.130, 11.600], [52.130, 11.610], [52.130, 11.620], [52.130, 11.630]]]      # straight east
         live = [[52.130, 11.600], [52.130, 11.608], [52.134, 11.610], [52.134, 11.620],             # bends north …
                 [52.130, 11.622], [52.130, 11.630]]                                                  # … and back
-        lines = {'tram:2': {'shapes': {'A': {'pts': live}}}}
-        keys, detour, closed, named = b._disruption_geometry(
-            {'lines': ['Linie 2'], 'title': 'Sperrung', 'desc': 'Die Haltestelle Musterplatz entfällt.'},
-            lines, {'2': regular}, {'Musterplatz': (52.13, 11.615)})
+        far = [[52.10, 11.70], [52.10, 11.71], [52.104, 11.712], [52.104, 11.72], [52.10, 11.722]]  # another bend, 5 km away
+        lines = {'tram:2': {'shapes': {'A': {'pts': live}, 'B': {'pts': far}}}}
+        musterweg = [[52.130, 11.612], [52.130, 11.618]]
+        geo = {'Musterweg': [musterweg]}
+        keys, detour, closed, named, pins = b._disruption_geometry(
+            {'lines': ['Linie 2'], 'title': 'Sperrung Musterweg', 'desc': 'Wegen Bauarbeiten ist der Musterweg gesperrt. Die Haltestelle Musterplatz entfällt.'},
+            lines, {'2': regular + [[[52.10, 11.70], [52.10, 11.73]]]}, {'Musterplatz': (52.13, 11.615)}, geocode=lambda st: geo.get(st))
         self.assertEqual(keys, ['tram:2'])
-        self.assertTrue(detour['tram:2'] and all(p[0] > 52.1325 for p in detour['tram:2'][0]))
-        self.assertTrue(closed['tram:2'])
+        self.assertEqual(list(closed), ['Musterweg'])                       # the street from the message, not a route diff
+        self.assertEqual(len(detour['tram:2']), 1)                          # only the bend near the closed street
+        self.assertTrue(all(p[0] > 52.1325 for p in detour['tram:2'][0]))
         self.assertEqual([n['name'] for n in named], ['Musterplatz'])
+        self.assertEqual(pins[0]['label'], 'Musterweg')
+
+    def test_no_place_no_geometry(self):
+        """Without a street or stop to anchor it, nothing is guessed onto the map (no red lines elsewhere)."""
+        b = self.b
+        live = [[52.130, 11.600], [52.134, 11.610], [52.130, 11.630]]
+        keys, detour, closed, named, pins = b._disruption_geometry(
+            {'lines': ['Linie 2'], 'title': 'Fahrzeugstörung', 'desc': 'Es kommt zu Verspätungen.'},
+            {'tram:2': {'shapes': {'A': {'pts': live}}}}, {'2': [[[52.12, 11.60], [52.12, 11.63]]]}, {}, geocode=lambda st: None)
+        self.assertEqual((detour, closed, named, pins), ({}, {}, [], []))
+
+    def test_maybachstrasse_at_the_zob(self):
+        b = self.b
+        found = b._streets_in({'title': 'Sperrung Maybachstraße', 'desc': 'Wegen Bauarbeiten ist die Maybachstraße am ZOB gesperrt. '
+                               'Die Linien 52 und 73 werden über die Otto-von-Guericke-Straße umgeleitet.'})
+        self.assertIn(('Maybachstraße', 'closed'), found)
+        self.assertIn(('Otto-von-Guericke-Straße', 'detour'), found)
+        found = b._streets_in({'title': 'Bauarbeiten Halberstädter Str.', 'desc': 'Die Halberstädter Straße ist zwischen Kroatenweg und Ambrosiusplatz gesperrt.'})
+        self.assertEqual(dict(found), {'Halberstädter Straße': 'closed', 'Kroatenweg': 'bound', 'Ambrosiusplatz': 'bound'})
+        self.assertIn(('Breiter Weg', 'closed'), b._streets_in({'title': 'Unfall', 'desc': 'Wegen eines Unfalls im Breiten Weg ist die Strecke gesperrt.'}))
+
+    def test_closed_part_between_two_cross_streets(self):
+        b = self.b
+        street = [[52.12, 11.60 + i * 0.002] for i in range(30)]           # ~4 km long
+        geo = {'Langestraße': [street], 'Ostweg': [[[52.115, 11.61], [52.125, 11.61]]][0], 'Westweg': [[[52.115, 11.62], [52.125, 11.62]]][0]}
+        geo = {k: (v if isinstance(v[0][0], list) else [v]) for k, v in geo.items()}
+        _, _, closed, _, _ = b._disruption_geometry(
+            {'lines': [], 'title': 'Sperrung', 'desc': 'Die Langestraße ist zwischen Ostweg und Westweg gesperrt.'}, {}, {}, {}, geocode=lambda st: geo.get(st))
+        lons = [p[1] for run in closed['Langestraße'] for p in run]
+        self.assertTrue(min(lons) >= 11.607 and max(lons) <= 11.623, (min(lons), max(lons)))
 
 
 if __name__ == '__main__':

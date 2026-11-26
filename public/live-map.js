@@ -547,7 +547,7 @@
     }
 
     function drawDisruptions(items) {
-        const sig = JSON.stringify(items.map(it => [it.id, it.lines, Object.keys(it.detour || {}).length, Object.keys(it.closed || {}).length, (it.stops || []).length])) + (lowQ ? 'L' : 'H');
+        const sig = JSON.stringify(items.map(it => [it.id, it.lines, it.detour, it.closed, it.pins])) + (lowQ ? 'L' : 'H');
         disr.items = items;
         if (sig === disr.sig && disr.layer) return;
         disr.sig = sig;
@@ -556,12 +556,13 @@
         const rend = lineRenderer();
         items.forEach(it => {
             const popup = () => disrPopup(it, it.lines || []);
-            let anchor = null;
-            Object.entries(it.closed || {}).forEach(([key, runs]) => runs.forEach(run => {
-                L.polyline(run, { pane: 'disruptions', color: '#dc2626', weight: 5, opacity: 0.85, dashArray: '2 9', lineCap: 'round', interactive: true, ...rend })
-                    .bindTooltip(`Linie ${escapeHtml(key.split(':')[1])}: hier gerade kein Halt`, { sticky: true, className: 'map-tooltip' })
+            // the closed street (from the message, looked up in OpenStreetMap)
+            Object.entries(it.closed || {}).forEach(([street, runs]) => runs.forEach(run => {
+                if (run.length < 2) return;
+                if (!lowQ) L.polyline(run, { pane: 'disruptions', color: '#fff', weight: 9, opacity: 0.7, lineCap: 'round', interactive: false, ...rend }).addTo(g);
+                L.polyline(run, { pane: 'disruptions', color: '#dc2626', weight: 6, opacity: 0.95, dashArray: '1 10', lineCap: 'round', interactive: true, ...rend })
+                    .bindTooltip(`${escapeHtml(street)} gesperrt`, { sticky: true, className: 'map-tooltip' })
                     .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
-                anchor = anchor || run[Math.floor(run.length / 2)];
             }));
             Object.entries(it.detour || {}).forEach(([key, runs]) => runs.forEach(run => {
                 const col = lineShapes.get(key)?.meta?.color || '#f59e0b';
@@ -571,13 +572,12 @@
                     .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
                 const mid = run[Math.floor(run.length / 2)];
                 if (!lowQ) L.marker(mid, { pane: 'disruptions', interactive: false, icon: L.divIcon({ className: 'dz-label', html: '<span>Umleitung</span>', iconSize: null }) }).addTo(g);
-                anchor = anchor || mid;
             }));
-            const pts = (it.stops || []).map(s => [s.lat, s.lon]);
-            if (!pts.length && anchor) pts.push(anchor);
-            pts.forEach(ll => {
-                L.marker(ll, { pane: 'disruptions', keyboard: true, title: it.title || 'Störung',
-                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: (it.stops || []).length ? [-8, 22] : [13, 13] }) })
+            const stopNames = new Set((it.stops || []).map(s => s.name));
+            (it.pins || []).forEach(p => {
+                const atStop = stopNames.has(p.label);
+                L.marker([p.lat, p.lon], { pane: 'disruptions', keyboard: true, title: `${it.title || 'Störung'}${p.label ? ' – ' + p.label : ''}`,
+                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: atStop ? [-8, 22] : [13, 13] }) })
                     .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
             });
         });
