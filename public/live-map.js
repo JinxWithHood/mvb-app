@@ -165,7 +165,8 @@
 
     function refreshStatus() {
         if (!lastRadarText) return;
-        setStatus(lastRadarText + (shapesBuilding ? ' · Linienwege werden ergänzt…' : ''), false);
+        const n = disr.items.length;
+        setStatus(lastRadarText + (n ? ` · ⚠ ${n} ${n === 1 ? 'Störung' : 'Störungen'}` : '') + (shapesBuilding ? ' · Linienwege werden ergänzt…' : ''), false);
     }
 
     function zoomScale() {
@@ -267,6 +268,7 @@
         pane('tramlines', 412, true);
         pane('focusLow', 414);
         pane('focusHigh', 416);
+        pane('disruptions', 418, true);
         pane('stations', 420, true);
         pane('labels', 430);
         pane('focusMarks', 640, true);
@@ -393,15 +395,100 @@
                 html: `<div class="hst"><div class="hst-pole"></div><div class="hst-h">H</div></div>`,
             });
             const m = L.marker([st.lat, st.lon], { icon, pane: 'stations', keyboard: false, bubblingMouseEvents: false });
-            // lines serving the stop only on tap
+            // on tap: the lines serving the stop and its next departures (live)
             m.bindPopup(() => `<div class="hst-pop">
                     <div class="hst-pop-head"><span class="hst-pop-h">H</span><strong>${escapeHtml(st.name)}</strong></div>
-                    ${badges ? `<div class="hst-pop-lines">${badges}</div>` : '<div class="hst-pop-empty">Keine Linien bekannt</div>'}
-                </div>`, { className: 'mv-popup hst-popup', closeButton: true, offset: [0, -34], maxWidth: 260 });
+                    ${badges ? `<div class="hst-pop-lines">${badges}</div>` : ''}
+                    <div class="hst-deps" aria-live="polite"><div class="hst-dep-wait">Abfahrten werden geladen …</div></div>
+                    <button type="button" class="hst-all" hidden>Alle Abfahrten</button>
+                </div>`, { className: 'mv-popup hst-popup', closeButton: true, offset: [0, -34], maxWidth: 300, minWidth: 250 });
+            m.on('popupopen', e => openStopBoard(e.popup, st));
+            m.on('popupclose', () => closeStopBoard());
             m.addTo(stationLayer);
         });
         if (wasOn) stationLayer.addTo(map);
         updateStationVisibility();
+    }
+
+    // ------------------------------------------------------------------
+    // Departures at a stop sign (popup), refreshed every 30 s while open
+    // ------------------------------------------------------------------
+    const stopIds = new Map();          // "name|lat|lon" -> {id, name}
+    let boardTimer = null;
+
+    function depEpoch(d) {
+        const m = /^(\d{1,2}):(\d{2})/.exec(d.time || '');
+        if (!m) return null;
+        const t = new Date();
+        t.setDate(t.getDate() + (d.day_offset || 0));
+        t.setHours(+m[1], +m[2], 0, 0);
+        return t.getTime() + (d.delay || 0) * 60000;
+    }
+
+    async function stopIdFor(st) {
+        const k = `${st.name}|${st.lat.toFixed(4)}|${st.lon.toFixed(4)}`;
+        if (stopIds.has(k)) return stopIds.get(k);
+        const res = await fetch(`${opts.apiBase}/stop-id?name=${encodeURIComponent(st.name)}&lat=${st.lat}&lon=${st.lon}`);
+        if (!res.ok) throw new Error('Haltestelle nicht gefunden');
+        const data = await res.json();
+        stopIds.set(k, data);
+        return data;
+    }
+
+    function renderStopBoard(box, deps) {
+        const now = Date.now();
+        const list = (Array.isArray(deps) ? deps : [])
+            .map(d => ({ d, t: depEpoch(d) }))
+            .filter(x => x.t != null && x.t > now - 60000)
+            .sort((a, b) => a.t - b.t)
+            .slice(0, 6);
+        if (!list.length) { box.innerHTML = '<div class="hst-dep-wait">Gerade keine Abfahrten.</div>'; return; }
+        box.innerHTML = list.map(({ d, t }) => {
+            const mins = Math.round((t - now) / 60000);
+            const when = d.cancelled ? 'fällt aus' : (mins <= 0 ? 'jetzt' : (mins < 60 ? `${mins} Min` : new Date(t).toTimeString().slice(0, 5)));
+            const c = /^#[0-9a-f]{6}$/i.test(d.lineColor || '') ? d.lineColor : '#64748b';
+            const short = String(d.line || '').replace(/^(Str|Bus|Tram)\s*/i, '');
+            const delay = d.cancelled ? '' : (d.delay > 0 ? `<em class="late">+${d.delay}</em>` : (d.delay < 0 ? `<em class="early">${d.delay}</em>` : ''));
+            return `<div class="hst-dep${d.cancelled ? ' cnl' : ''}"><span class="hst-dep-l${darkText(c)}" style="--lc:${c}">${escapeHtml(short)}</span>`
+                + `<span class="hst-dep-dir">${escapeHtml(d.direction || '')}</span>`
+                + `<span class="hst-dep-t">${escapeHtml(when)}${delay}</span></div>`;
+        }).join('');
+    }
+
+    function openStopBoard(popup, st) {
+        closeStopBoard();
+        const root = popup.getElement && popup.getElement();
+        const box = root && root.querySelector('.hst-deps');
+        const all = root && root.querySelector('.hst-all');
+        if (!box) return;
+        let station = null;
+        const load = async () => {
+            try {
+                station = station || await stopIdFor(st);
+                const res = await fetch(`${opts.apiBase}/departures?station_id=${encodeURIComponent(station.id)}&duration=45`);
+                const data = await res.json();
+                if (!box.isConnected) return;
+                renderStopBoard(box, Array.isArray(data) ? data : data.departures);
+                if (all) all.hidden = false;
+                popup.update();
+            } catch (e) {
+                if (box.isConnected) box.innerHTML = '<div class="hst-dep-wait">Abfahrten gerade nicht verfügbar.</div>';
+            }
+        };
+        if (all) all.onclick = () => {
+            if (!station || !window.MVBApp) return;
+            window.MVBApp.setCurrentStation({ id: station.id, name: station.name });
+            window.MVBApp.switchTab('departures');
+            if (window.MVBApp.setPlanView) window.MVBApp.setPlanView('board');
+            if (window.MVBApp.fetchDepartures) window.MVBApp.fetchDepartures();
+        };
+        load();
+        boardTimer = setInterval(load, 30000);
+    }
+
+    function closeStopBoard() {
+        clearInterval(boardTimer);
+        boardTimer = null;
     }
 
     function updateStationVisibility() {
@@ -413,6 +500,76 @@
         const show = z >= (lowQ ? 17 : 16);
         if (show && !map.hasLayer(stationLayer)) stationLayer.addTo(map);
         if (!show && map.hasLayer(stationLayer)) map.removeLayer(stationLayer);
+    }
+
+    // ---------------------------------------------------------
+    // Störungen (Verkehrsmelder): Umleitung, gesperrter Abschnitt, betroffene Halte.
+    // "erledigt" → the server leaves it out and the line is drawn normally again.
+    // ---------------------------------------------------------
+    const disr = { items: [], layer: null, timer: null, sig: '' };
+
+    async function loadDisruptions() {
+        if (disr.timer) clearTimeout(disr.timer);
+        try {
+            const res = await fetch(`${opts.apiBase}/disruptions/map`);
+            const data = await res.json();
+            if (Array.isArray(data.items)) drawDisruptions(data.items.filter(it => !it.done));
+        } catch (e) {
+            console.warn('Störungen nicht verfügbar:', e);
+        }
+        refreshStatus();
+        if (visible) disr.timer = setTimeout(loadDisruptions, 180000);
+    }
+
+    function disrPopup(it, lineKeys) {
+        const badges = lineKeys.map(k => {
+            const m = lineShapes.get(k)?.meta;
+            const short = m ? m.short : k.split(':')[1];
+            const col = m ? m.color : '#64748b';
+            return `<span class="dz-badge" style="--lc:${escapeHtml(col)}">${escapeHtml(short)}</span>`;
+        }).join('');
+        const text = (it.desc || '').trim();
+        return `<div class="dz-pop${it.critical ? ' crit' : ''}"><div class="dz-head"><span class="dz-ico" aria-hidden="true">⚠</span>${badges}</div>`
+            + `<strong>${escapeHtml(it.title || 'Störung')}</strong>${it.time ? `<small>${escapeHtml(it.time)}</small>` : ''}`
+            + (text ? `<p>${escapeHtml(text.length > 360 ? text.slice(0, 357) + '…' : text)}</p>` : '') + '</div>';
+    }
+
+    function drawDisruptions(items) {
+        const sig = JSON.stringify(items.map(it => [it.id, it.lines, Object.keys(it.detour || {}).length, Object.keys(it.closed || {}).length, (it.stops || []).length])) + (lowQ ? 'L' : 'H');
+        disr.items = items;
+        if (sig === disr.sig && disr.layer) return;
+        disr.sig = sig;
+        if (disr.layer) map.removeLayer(disr.layer);
+        const g = L.layerGroup();
+        const rend = lineRenderer();
+        items.forEach(it => {
+            const popup = () => disrPopup(it, it.lines || []);
+            let anchor = null;
+            Object.entries(it.closed || {}).forEach(([key, runs]) => runs.forEach(run => {
+                L.polyline(run, { pane: 'disruptions', color: '#dc2626', weight: 5, opacity: 0.85, dashArray: '2 9', lineCap: 'round', interactive: true, ...rend })
+                    .bindTooltip(`Linie ${escapeHtml(key.split(':')[1])}: hier gerade kein Halt`, { sticky: true, className: 'map-tooltip' })
+                    .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
+                anchor = anchor || run[Math.floor(run.length / 2)];
+            }));
+            Object.entries(it.detour || {}).forEach(([key, runs]) => runs.forEach(run => {
+                const col = lineShapes.get(key)?.meta?.color || '#f59e0b';
+                if (!lowQ) L.polyline(run, { pane: 'disruptions', color: '#f59e0b', weight: 11, opacity: 0.35, lineCap: 'round', interactive: false, ...rend }).addTo(g);
+                L.polyline(run, { pane: 'disruptions', color: col, weight: 4, opacity: 1, dashArray: '10 7', lineCap: 'round', interactive: true, ...rend })
+                    .bindTooltip(`Umleitung Linie ${escapeHtml(key.split(':')[1])}`, { sticky: true, className: 'map-tooltip' })
+                    .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
+                const mid = run[Math.floor(run.length / 2)];
+                if (!lowQ) L.marker(mid, { pane: 'disruptions', interactive: false, icon: L.divIcon({ className: 'dz-label', html: '<span>Umleitung</span>', iconSize: null }) }).addTo(g);
+                anchor = anchor || mid;
+            }));
+            const pts = (it.stops || []).map(s => [s.lat, s.lon]);
+            if (!pts.length && anchor) pts.push(anchor);
+            pts.forEach(ll => {
+                L.marker(ll, { pane: 'disruptions', keyboard: true, title: it.title || 'Störung',
+                    icon: L.divIcon({ className: 'dz-pin' + (it.critical ? ' crit' : ''), html: '<span>⚠</span>', iconSize: [26, 26], iconAnchor: [13, 13] }) })
+                    .bindPopup(popup, { maxWidth: 300, className: 'dz-popup' }).addTo(g);
+            });
+        });
+        disr.layer = g.addTo(map);
     }
 
     // ---------------------------------------------------------
@@ -800,6 +957,7 @@
         lineShapes.forEach(e => { e.layers.forEach(({ layer }) => map.removeLayer(layer)); e.bundled = null; });
         lineShapes.clear();
         if (lastLines.length) drawLineShapes(lastLines);
+        if (disr.items.length) { disr.sig = ''; drawDisruptions(disr.items); }
         updateStationVisibility();
         vehicles.forEach(st => { st.root = null; st.body = null; st.angle = null; });
         if (focus) updateFocusGeometry(true);
@@ -1044,9 +1202,12 @@
         pollTimer = setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
         if (!rafId) rafId = requestAnimationFrame(animate);
         loadLineShapes();
+        loadDisruptions();
     }
 
     function stopPolling() {
+        if (disr.timer) clearTimeout(disr.timer);
+        disr.timer = null;
         if (pollTimer) clearInterval(pollTimer);
         pollTimer = null;
         if (shapesTimer) clearTimeout(shapesTimer);

@@ -8,6 +8,7 @@ if ROOT not in sys.path:
 
 # the backend reads these at import time
 os.environ.setdefault('FORMATION_AGENT_KEY', 'test-agent-key')
+os.environ.setdefault('STATS', '0')          # no background collector in tests
 os.environ.pop('FORMATION_RELAY_URL', None)
 
 AGENT_KEY = os.environ['FORMATION_AGENT_KEY']

@@ -1161,6 +1161,43 @@ def search_station():
 # -------------------------------------------------------------------
 # GET /api/departures  —  Station departure board
 # -------------------------------------------------------------------
+_stop_id_cache = {}
+
+
+@app.route('/api/stop-id')
+def stop_id_for_map():
+    """Live map: the HAFAS station behind a stop sign (name + position) – for its departures."""
+    name = (request.args.get('name') or '').strip()[:120]
+    try:
+        lat, lon = float(request.args.get('lat')), float(request.args.get('lon'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'lat/lon fehlt'}), 400
+    target = re.sub(r'\s*\((tram|bus|tram/bus)\)', '', _norm_station(name))
+    key = (target, round(lat, 4), round(lon, 4))
+    if key in _stop_id_cache:
+        return jsonify(_stop_id_cache[key])
+    found = None
+    try:
+        from pyhafas.types.nearby import LatLng
+        near = (nasa_client or oebb_client).nearby(LatLng(lat, lon), max_walking_distance=500, max_locations=15)
+        cands = [(s, re.sub(r'(tram|bus|trambus)$', '', _norm_station(s.name))) for s in near or []]
+        for s, n in cands:
+            if target and n and (n == target or target in n or n in target):
+                found = s
+                break
+        if found is None and cands:
+            found = cands[0][0]                     # closest stop
+    except Exception as ex:
+        print(f"[WARN] stop-id: {ex}")
+    if found is None:
+        return jsonify({'error': 'Haltestelle nicht gefunden'}), 404
+    out = {'id': str(found.id), 'name': found.name}
+    if len(_stop_id_cache) > 2000:
+        _stop_id_cache.clear()
+    _stop_id_cache[key] = out
+    return jsonify(out)
+
+
 @app.route('/api/departures')
 def get_departures():
     """
@@ -5216,6 +5253,246 @@ def _tr_journey_response(jid, station_name, line_hint=None, direction_hint=None,
 # Admin area (login, push broadcast, maintenance mode) – see admin.py
 # ---------------------------------------------------------------------------
 import sys as _sys
+# ---------------------------------------------------------------------------
+# Pünktlichkeits-Statistik (stats.py): every minute the radar vehicles are looked at,
+# every 5 minutes the Verkehrsmelder; one document per month in the shared store.
+# ---------------------------------------------------------------------------
+import stats as _stats_mod
+
+STATS_DIR = os.path.join(CACHE_DIR, 'stats')
+
+
+def _stats_load(name):
+    doc = _kv_get(f'stats:{name}')
+    if doc:
+        return doc
+    path = os.path.join(STATS_DIR, f'{name}.json')
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def _stats_save(name, doc):
+    os.makedirs(STATS_DIR, exist_ok=True)
+    path = os.path.join(STATS_DIR, f'{name}.json')
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, ensure_ascii=False, separators=(',', ':'))
+    os.replace(tmp, path)
+    _kv_set(f'stats:{name}', doc)
+
+
+_stats = _stats_mod.Stats(local_tz, _stats_load, _stats_save)
+_stats_worker = {'running': False, 'last': 0, 'disr': [], 'disr_ts': 0}
+
+
+def _current_disruptions():
+    """Verkehrsmelder messages right now (list) – or None when the site can't be read."""
+    try:
+        with app.test_request_context('/api/disruptions'):
+            resp = get_disruptions()
+        if isinstance(resp, tuple):
+            return None
+        data = resp.get_json()
+        return data if isinstance(data, list) else None
+    except Exception as ex:
+        print(f"[WARN] Störungen für Statistik: {ex}")
+        return None
+
+
+def _stats_loop():
+    last_disr = last_flush = 0
+    while True:
+        now = time.time()
+        try:
+            with app.test_request_context('/api/radar'):
+                resp = get_radar()
+            data = resp.get_json() if not isinstance(resp, tuple) else None
+            if data and data.get('vehicles'):
+                _stats.observe(data['vehicles'], now)
+                _stats_worker['last'] = now
+        except Exception as ex:
+            print(f"[WARN] Statistik (Fahrzeuge): {ex}")
+        if now - last_disr > 300:
+            items = _current_disruptions()
+            if items is not None:
+                try:
+                    _disruptions_changed(_stats_worker['disr'], items)
+                    _stats.observe_disruptions(items, now)
+                    _stats_worker['disr'], _stats_worker['disr_ts'] = items, now
+                except Exception as ex:
+                    print(f"[WARN] Statistik (Störungen): {ex}")
+            last_disr = now
+        if now - last_flush > 300:
+            _stats.flush()
+            last_flush = now
+        time.sleep(60)
+
+
+def _ensure_stats_worker():
+    if not _stats_worker['running'] and os.environ.get('STATS', '1') != '0':
+        _stats_worker['running'] = True
+        threading.Thread(target=_stats_loop, daemon=True, name='stats').start()
+
+
+@app.before_request
+def _start_stats_worker():
+    _ensure_stats_worker()
+
+
+@app.route('/api/stats')
+def api_stats():
+    """Punctuality per line for a day / week / month / year (max. one year back)."""
+    today = datetime.datetime.now(local_tz).date()
+    try:
+        day = datetime.date.fromisoformat(request.args.get('date') or today.isoformat())
+    except ValueError:
+        return jsonify({'error': 'Datum ungültig (JJJJ-MM-TT)'}), 400
+    span = {'day': 1, 'week': 7, 'month': 30, 'year': 365}.get(request.args.get('range') or 'day')
+    if span is None:
+        return jsonify({'error': 'range: day, week, month oder year'}), 400
+    earliest = today - datetime.timedelta(days=365)
+    day = min(max(day, earliest), today)
+    frm = max(day - datetime.timedelta(days=span - 1), earliest)
+    out = _stats.summary(frm, day)
+    first = _stats.first_day()
+    out.update({'from': frm.isoformat(), 'to': day.isoformat(), 'today': today.isoformat(), 'earliest': earliest.isoformat(),
+                'first': first.isoformat() if first else None, 'range': request.args.get('range') or 'day',
+                'collecting': bool(_stats_worker['last']), 'updated': int(_stats_worker['last'] * 1000) or None})
+    resp = jsonify(out)
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Störungen auf der Karte: affected lines, the diversion (where the live route leaves the
+# regular one) and the stretch that isn't served. "erledigt" -> back to normal.
+# ---------------------------------------------------------------------------
+_disr_map_cache = {'ts': 0, 'data': None}
+
+
+def _disr_line_keys(item, known):
+    """'Linie 2', 'Linien 2 und 9', 'Bus 52' -> ['tram:2', 'tram:9', 'bus:52'] (only lines we know)."""
+    text = ' '.join(item.get('lines') or []) + ' ' + (item.get('title') or '')
+    nums = re.findall(r'(?<![\d:.,])(\d{1,3})(?![\d:.,])', ' '.join(re.findall(r'(?:Linie[n]?|Tram|Straßenbahn|Bus(?:linie)?|SEV)[^.;:]*', text, flags=re.I)))
+    keys = []
+    for n in nums:
+        for k in (f'tram:{n}', f'bus:{n}'):
+            if k in known and k not in keys:
+                keys.append(k)
+                break
+    return keys
+
+
+def _runs_away(points, ref_segs, limit=80, min_len=150):
+    """Runs of `points` farther than `limit` m from every segment in ref_segs (each ≥ min_len)."""
+    runs, cur = [], []
+    for p in points:
+        far = not any(routesnap._seg_dist(p, a, b) < limit for a, b in ref_segs)
+        if far:
+            cur.append(p)
+        else:
+            if len(cur) >= 2 and sum(routesnap.dist(a, b) for a, b in zip(cur, cur[1:])) >= min_len:
+                runs.append(cur)
+            cur = []
+    if len(cur) >= 2 and sum(routesnap.dist(a, b) for a, b in zip(cur, cur[1:])) >= min_len:
+        runs.append(cur)
+    return runs
+
+
+def _thin(pts, step=25):
+    out = []
+    for p in pts:
+        if not out or routesnap.dist(out[-1], p) >= step:
+            out.append([round(p[0], 5), round(p[1], 5)])
+    if pts and out[-1] != [round(pts[-1][0], 5), round(pts[-1][1], 5)]:
+        out.append([round(pts[-1][0], 5), round(pts[-1][1], 5)])
+    return out
+
+
+def _disruption_geometry(item, lines, net_lines, stops):
+    keys = _disr_line_keys(item, lines)
+    detour, closed = {}, {}
+    for k in keys:
+        live = [s['pts'] for d, s in (lines[k].get('shapes') or {}).items() if s.get('pts')]
+        regular = net_lines.get(k.split(':', 1)[1]) if k.startswith('tram:') else None
+        if not live or not regular:
+            continue
+        reg_segs = [(a, b) for seg in regular for a, b in zip(seg, seg[1:])]
+        live_segs = [(a, b) for sh in live for a, b in zip(sh, sh[1:])]
+        d = [_thin(r) for sh in live for r in _runs_away(_thin(sh), reg_segs)]
+        c = [_thin(r) for seg in regular for r in _runs_away(_thin(seg), live_segs)]
+        if d:
+            detour[k] = d
+        if c:
+            closed[k] = c
+    text = f"{item.get('title') or ''} {item.get('desc') or ''}"
+    low = re.sub(r'\s+', ' ', text.lower())
+    named = []
+    for nm, (lat, lon) in stops.items():
+        nm = re.sub(r'\s*\((tram|bus|tram/bus)\)$', '', nm, flags=re.I)
+        if len(nm) >= 5 and nm.lower() in low and all(n['name'] != nm for n in named):
+            named.append({'name': nm, 'lat': lat, 'lon': lon})
+    return keys, detour, closed, named[:12]
+
+
+@app.route('/api/disruptions/map')
+def api_disruptions_map():
+    now = time.time()
+    if _disr_map_cache['data'] and now - _disr_map_cache['ts'] < 120:
+        return jsonify(_disr_map_cache['data'])
+    items = _stats_worker['disr'] if now - _stats_worker['disr_ts'] < 600 else None
+    if items is None:
+        items = _current_disruptions()
+    if items is None:
+        return jsonify({'error': 'Verkehrsmelder nicht erreichbar', 'items': []}), 502
+    _load_line_shapes()
+    with _line_shapes_lock:
+        lines = {k: v for k, v in _line_shapes['lines'].items()}
+    net = _snap_network() or {}
+    net_lines = {str(l.get('ref')): l.get('segs') or [] for l in net.get('lines') or []}
+    stops = {}
+    for e in lines.values():
+        for nm, ll in (e.get('stops') or {}).items():
+            if nm and isinstance(ll, (list, tuple)) and len(ll) >= 2:
+                stops.setdefault(re.sub(r'^Magdeburg,\s*', '', str(nm)), (ll[0], ll[1]))
+    out = []
+    for it in items:
+        done = _stats_mod._looks_done(it)
+        try:
+            keys, detour, closed, named = _disruption_geometry(it, lines, net_lines, stops) if not done else ([], {}, {}, [])
+        except Exception as ex:
+            print(f"[WARN] Störung auf Karte: {ex}")
+            keys, detour, closed, named = [], {}, {}, []
+        out.append({'id': it.get('id'), 'title': it.get('title'), 'desc': (it.get('desc') or '')[:600], 'time': it.get('time'),
+                    'critical': bool(it.get('critical')), 'done': done, 'lines': keys,
+                    'detour': detour, 'closed': closed, 'stops': named})
+    data = {'items': out, 'ts': int(now * 1000)}
+    _disr_map_cache.update(ts=now, data=data)
+    return jsonify(data)
+
+
+def _disruptions_changed(before, after):
+    """A message ended (gone or 'erledigt'): rebuild those lines' shapes from the live trips,
+    so the map shows the normal route again instead of the old diversion."""
+    if not before:
+        return
+    known = set(_line_shapes['lines'])
+    ended = []
+    now_ids = {a.get('id'): a for a in after}
+    for b in before:
+        a = now_ids.get(b.get('id'))
+        if a is None or (_stats_mod._looks_done(a) and not _stats_mod._looks_done(b)):
+            ended.extend(_disr_line_keys(b, known))
+    if ended:
+        with _line_shapes_lock:
+            for k in set(ended):
+                _line_shapes['lines'].pop(k, None)
+        _disr_map_cache['ts'] = 0
+        print(f"[INFO] Störung beendet – Linienwege neu: {sorted(set(ended))}")
+
+
 import admin as _admin
 _admin.init(app, _sys.modules[__name__])
 

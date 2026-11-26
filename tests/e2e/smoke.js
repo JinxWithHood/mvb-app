@@ -163,6 +163,41 @@ async function openCard(page, i) {
       check(errors.length === 0, `[pin] no JavaScript errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
       await ctx.close();
     }
+
+    // ---- 5. Statistik unter der Karte: Kacheln, Linien, Störungen des Tages, Zeitraum wechseln
+    {
+      const { ctx, page, errors } = await openApp(browser, 5099, { desktop: true });
+      const today = new Date().toISOString().slice(0, 10);
+      const asked = [];
+      const line = (key, short, type, color, n, e, o, l, avg, max) => ({ key, short, type, color, n, early: e, onTime: o, late: l, avg, avgLate: 5.2, max, hist: [] });
+      await ctx.route('**/api/stats?*', (r) => {
+        const u = new URL(r.request().url());
+        asked.push(u.searchParams.get('range'));
+        const range = u.searchParams.get('range');
+        const trend = Array.from({ length: { day: 1, week: 7, month: 30, year: 365 }[range] }, (_, i) => ({ date: today, n: i % 3 ? 120 : 0, onTime: 80 + (i % 7), avg: 1.1 }));
+        r.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          from: today, to: today, today, earliest: '2025-11-26', first: today, range,
+          total: { n: 1834, early: 4.2, onTime: 81.5, late: 14.3, avg: 1.4, avgLate: 5.6 },
+          lines: [line('tram:1', '1', 'tram', '#e30613', 402, 3.1, 86.2, 10.7, 0.9, 9), line('tram:9', '9', 'tram', '#f6a500', 377, 6, 70, 24, 2.6, 14),
+                  line('bus:52', '52', 'bus', '#00718f', 210, 2, 90, 8, 0.4, 7)],
+          trend, disruptions: [{ id: 'a', title: 'Bauarbeiten Breiter Weg', lines: ['Linie 9'], first: Date.now() / 1000 - 7200, last: Date.now() / 1000, text: 'Die Linie 9 fährt eine Umleitung.', done: false, gone: false, critical: false, days: [today] },
+                               { id: 'b', title: 'Unfall Olvenstedter Graseweg', lines: ['Linie 1'], first: Date.now() / 1000 - 3600, last: Date.now() / 1000 - 1800, text: 'Erledigt.', done: true, gone: false, critical: true, days: [today] }] }) });
+      });
+      await page.evaluate(() => { try { MVBApp.switchTab('map'); } catch (e) { /* Leaflet not loaded offline */ } document.getElementById('lineStats').scrollIntoView(); });
+      await page.waitForTimeout(1500);
+      const st = await page.evaluate(() => ({ tiles: document.querySelectorAll('#lineStats .st-tile').length, lines: document.querySelectorAll('#lineStats .st-lines > li').length,
+        disr: document.querySelectorAll('#lineStats .st-dis').length, done: document.querySelector('#lineStats .st-dis.done .st-dis-st')?.textContent }));
+      check(st.tiles === 5 && st.lines === 3, '[stats] tiles and one row per line');
+      check(st.disr === 2 && st.done === 'erledigt', '[stats] disruptions of the day with status');
+      await page.evaluate(() => document.querySelector('#lineStats [data-group=bus]').click());
+      check(await page.evaluate(() => document.querySelectorAll('#lineStats .st-lines > li').length) === 1, '[stats] bus filter');
+      await page.evaluate(() => document.querySelector('#lineStats [data-range=month]').click());
+      await page.waitForTimeout(800);
+      check(asked.includes('month') && await page.evaluate(() => !!document.querySelector('#lineStats .st-trend path.st-line')), '[stats] month view with trend line');
+      if (process.env.SHOT) await page.locator('#lineStats').screenshot({ path: process.env.SHOT });
+      check(errors.filter((e) => !/Leaflet|L is not defined/.test(e)).length === 0, `[stats] no JavaScript errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+      await ctx.close();
+    }
   } catch (e) {
     failures.push(String(e && e.stack || e));
     console.error(e);
