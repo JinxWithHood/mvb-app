@@ -9439,3 +9439,5 @@ body.settings-open { overflow: hidden; }
 .map-ulq .mv-body::after, .map-ulq .mv-body::before { display: none !important; }
 .map-ulq .dz-label { display: none !important; }
 .map-ulq .hst-h { box-shadow: none !important; }
+
+.dz-pop .dz-text { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }

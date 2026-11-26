@@ -126,6 +126,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(f({'lines': ['Linie N1', 'Linie N4']}, known | {'bus:N4'}), ['bus:N1', 'bus:N4'])
         self.assertEqual(f({'title': 'Nachtlinie N 8: Umleitung', 'lines': []}, known), ['bus:N8'])
 
+    def test_real_message_n9_nordwest(self):
+        b = self.b
+        it = {'title': 'Linien 72 und N9: Umleitung wegen Bauarbeiten', 'lines': ['Linie 72', 'Linie N9'],
+              'desc': 'Linien 72 und N9:Ab Montag, den 8. Juni, kommt es in Magdeburg-Nordwest aufgrund von Bauarbeiten für eine '
+                      'Fernwärmeleitung zu einer Umleitung.\nDie Hugo-Junkers-Allee wird zur Einbahnstraße. Daher können die Haltestellen '
+                      'Schule Nordwest, Juliusstraße, Lorenzweg, Ostrowskistraße und Boquet-Graseweg in Fahrtrichtung Olvenstedter Platz nicht bedient werden.'}
+        self.assertEqual(b._disr_line_keys(it, {'bus:72', 'tram:9'}), ['bus:72', 'bus:N9'])      # N9, not tram 9
+        self.assertEqual(dict(b._streets_in(it)).get('Hugo-Junkers-Allee'), 'closed')
+        self.assertNotIn('Einbahnstraße', dict(b._streets_in(it)))
+        stops = {n: (52.15 + i * 0.001, 11.58) for i, n in enumerate(['Schule Nordwest', 'Juliusstraße', 'Lorenzweg', 'Ostrowskistraße', 'Boquet-Graseweg'])}
+        _, _, closed, named, pins = b._disruption_geometry(it, {}, {}, stops,
+                                                           geocode=lambda st: [[[52.15, 11.57], [52.152, 11.575]]] if st == 'Hugo-Junkers-Allee' else None)
+        self.assertEqual(len(named), 5)
+        self.assertEqual(len(pins), 1)                                                           # not five
+        self.assertEqual(pins[0]['label'], 'Hugo-Junkers-Allee')
+
     def test_kind_of_disruption(self):
         k = self.b._disruption_kind
         self.assertEqual(k({'title': 'Unfall an der Haltestelle Hasselbachplatz', 'desc': 'Die Polizei ist vor Ort.'}), 'accident')

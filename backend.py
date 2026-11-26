@@ -5436,12 +5436,15 @@ _STREET_SUFFIX = r'(?:straße|strasse|str\.|weg|allee|platz|ring|damm|ufer|brüc
 _STREET_WORD = r'(?:Straße|Strasse|Str\.|Weg|Allee|Platz|Ring|Damm|Ufer|Brücke|Chaussee|Tunnel)'
 _STREET_RE = re.compile(
     r'\b[A-ZÄÖÜ][\wäöüß]*(?:-[\wäöüß]+)+-' + _STREET_WORD +                       # Otto-von-Guericke-Straße
+    r'|\b[A-ZÄÖÜ][a-zäöüß]+-[A-ZÄÖÜ][a-zäöüß]{2,}' + _STREET_SUFFIX + r'(?![a-zäöüß])' +   # Boquet-Graseweg
     r'|\b[A-ZÄÖÜ][a-zäöüß]{2,}' + _STREET_SUFFIX + r'(?![a-zäöüß])' +             # Maybachstraße, Damaschkeplatz
     r'|\b(?:[A-ZÄÖÜ][a-zäöüß]+(?:er|en|es|e)\s){1,2}' + _STREET_WORD + r'(?![a-zäöüß])')   # Breiter Weg, Halberstädter Straße
 _NOT_A_STREET = {'die', 'der', 'das', 'diese', 'dieser', 'eine', 'ein', 'wegen', 'bauarbeiten', 'arbeiten', 'gleisarbeiten',
                  'baustellen', 'umleitungen', 'haltestellen', 'linien', 'bahnen', 'busse', 'neue', 'neuen', 'gesamte', 'gesamten',
                  'betroffene', 'gesperrte', 'gesperrten', 'genannte', 'genannten', 'unsere', 'unseren'}
-_CLOSED_WORDS = re.compile(r'sperr|baustelle|bauarbeit|unfall|havarie|blockier|nicht befahrbar|nicht passierbar|'
+_GENERIC_STREETS = {'einbahnstraße', 'hauptverkehrsstraße', 'nebenstraße', 'umleitungsstrecke', 'ersatzhaltestelle', 'fahrweg',
+                    'linienweg', 'umweg', 'rückweg', 'hinweg', 'fußweg', 'radweg', 'gehweg', 'stadtring', 'bahnsteig'}
+_CLOSED_WORDS = re.compile(r'sperr|einbahnstraße|nur (?:noch )?in (?:eine|einer) richtung|baustelle|bauarbeit|unfall|havarie|blockier|nicht befahrbar|nicht passierbar|'
                            r'polizeieinsatz|feuerwehr|gleisarbeit|fahrleitung|weichen|veranstaltung|demonstration|einsatz', re.I)
 _DETOUR_BEFORE = re.compile(r'(über|via|durch|entlang|umgeleitet|umleitung|ersatzweise|stattdessen)\b[^.]{0,25}$', re.I)
 _BOUND_BEFORE = re.compile(r'(zwischen|bis|ab|höhe|kreuzung|einmündung|ecke|abzweig)\b[^.,]{0,30}$|zwischen\b[^.,]{0,60}\bund\s+(?:der|dem|den|die)?\s*$', re.I)
@@ -5473,7 +5476,7 @@ def _streets_in(item):
     for sent in re.split(r'(?<=[.!?;:])\s+|\n+', text):
         for m in _STREET_RE.finditer(sent):
             st = _norm_street(m.group(0))
-            if len(st) < 6 or not re.search(r'[A-ZÄÖÜ]', st[:1]):
+            if len(st) < 6 or not re.search(r'[A-ZÄÖÜ]', st[:1]) or st.lower() in _GENERIC_STREETS:
                 continue
             before = sent[:m.start()]
             if _DETOUR_BEFORE.search(before):
@@ -5704,7 +5707,7 @@ def _build_disruption_map(items):
                 keys, detour, closed, named, pins = _disruption_geometry(it, lines, net_lines, stops)
             except Exception as ex:
                 print(f"[WARN] Störung auf Karte: {ex}")
-        out.append({'id': it.get('id'), 'title': it.get('title'), 'desc': (it.get('desc') or '')[:600], 'time': it.get('time'),
+        out.append({'id': it.get('id'), 'title': it.get('title'), 'desc': (it.get('desc') or '')[:1500], 'time': it.get('time'),
                     'critical': bool(it.get('critical')), 'done': done, 'lines': keys, 'kind': _disruption_kind(it),
                     'detour': detour, 'closed': closed, 'stops': named, 'pins': pins})
     now = time.time()

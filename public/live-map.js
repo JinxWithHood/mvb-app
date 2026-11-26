@@ -556,7 +556,7 @@
         const text = (it.desc || '').trim();
         return `<div class="dz-pop dz-${escapeHtml(it.kind || 'other')}${it.critical ? ' crit' : ''}"><div class="dz-head"><span class="dz-kind">${dzSvg(it.kind, 16)}${escapeHtml(dzIcon(it.kind).label)}</span>${badges}</div>`
             + `<strong>${escapeHtml(it.title || 'Störung')}</strong>${it.time ? `<small>${escapeHtml(it.time)}</small>` : ''}`
-            + (text ? `<p>${escapeHtml(text.length > 360 ? text.slice(0, 357) + '…' : text)}</p>` : '') + '</div>';
+            + (text ? `<p class="dz-text">${escapeHtml(text)}</p>` : '') + '</div>';
     }
 
     function drawDisruptions(items) {
