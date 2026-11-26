@@ -5668,10 +5668,14 @@ def _disruption_geometry(item, lines, net_lines, stops, geocode=_street_geometry
     anchors = [p for runs in closed.values() for run in runs for p in run[::3] + run[-1:]]
     if anchors and stop_pts:                              # stops far away from the problem are just mentioned in passing
         named = [n for n in named if _near_any([n['lat'], n['lon']], anchors, 1500)]
+    street_anchors = list(anchors)
     anchors += [[n['lat'], n['lon']] for n in named]
 
+    # a dashed diversion only when the message really talks about one AND names the closed street:
+    # the OSM route of a line can simply be out of date (new Netzplan), that is no diversion
     detour = {}
-    if anchors:
+    if street_anchors and re.search(r'umleit|umgeleitet|weicht|ausweich', text, re.I):
+        anchors = street_anchors
         for k in keys:
             live = [s['pts'] for d, s in (lines.get(k, {}).get('shapes') or {}).items() if s.get('pts')]
             regular = net_lines.get(k.split(':', 1)[1]) if k.startswith('tram:') else None

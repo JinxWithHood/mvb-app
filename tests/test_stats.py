@@ -173,7 +173,7 @@ class ApiTests(unittest.TestCase):
         musterweg = [[52.130, 11.612], [52.130, 11.618]]
         geo = {'Musterweg': [musterweg]}
         keys, detour, closed, named, pins = b._disruption_geometry(
-            {'lines': ['Linie 2'], 'title': 'Sperrung Musterweg', 'desc': 'Wegen Bauarbeiten ist der Musterweg gesperrt. Die Haltestelle Musterplatz entfällt.'},
+            {'lines': ['Linie 2'], 'title': 'Sperrung Musterweg', 'desc': 'Wegen Bauarbeiten ist der Musterweg gesperrt, die Linie 2 wird umgeleitet. Die Haltestelle Musterplatz entfällt.'},
             lines, {'2': regular + [[[52.10, 11.70], [52.10, 11.73]]]}, {'Musterplatz': (52.13, 11.615)}, geocode=lambda st: geo.get(st))
         self.assertEqual(keys, ['tram:2'])
         self.assertEqual(list(closed), ['Musterweg'])                       # the street from the message, not a route diff
@@ -181,6 +181,16 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(all(p[0] > 52.1325 for p in detour['tram:2'][0]))
         self.assertEqual([n['name'] for n in named], ['Musterplatz'])
         self.assertEqual(pins[0]['label'], 'Musterweg')
+
+    def test_no_diversion_from_an_outdated_osm_route(self):
+        """Line 9 runs differently than OSM knows: without a closed street + 'Umleitung' nothing is dashed."""
+        b = self.b
+        live = [[52.130, 11.600], [52.134, 11.610], [52.134, 11.620], [52.130, 11.630]]
+        stops = {'Lorenzweg': (52.134, 11.615)}
+        _, detour, _, _, _ = b._disruption_geometry(
+            {'lines': ['Linie 9'], 'title': 'Linie 9: Umleitung', 'desc': 'Die Haltestelle Lorenzweg wird nicht bedient.'},
+            {'tram:9': {'shapes': {'A': {'pts': live}}}}, {'9': [[[52.130, 11.600], [52.130, 11.630]]]}, stops, geocode=lambda st: None)
+        self.assertEqual(detour, {})
 
     def test_no_place_no_geometry(self):
         """Without a street or stop to anchor it, nothing is guessed onto the map (no red lines elsewhere)."""
