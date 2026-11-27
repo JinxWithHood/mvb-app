@@ -25,7 +25,7 @@
           <header class="st-head">
             <div>
               <h2 id="statsTitle">Pünktlichkeit der Linien</h2>
-              <p class="st-sub">Gemessen an jedem Halt · zu früh ab 3 Min vor Plan, verspätet ab 4 Min nach Plan</p>
+              <p class="st-sub">Gemessen an jedem Halt · pünktlich ±2 Min · leicht verspätet +3/+4 · verspätet ab +5 · zu früh ab 3 Min vor Plan</p>
             </div>
           </header>
           <div class="st-controls">
@@ -89,8 +89,9 @@
     function bar(m) {
         const seg = (cls, pct, label) => (pct > 0
             ? `<span class="st-seg-${cls}" style="flex-basis:${pct}%" title="${esc(label)}: ${fmt(pct)} %"></span>` : '');
-        return `<div class="st-bar" role="img" aria-label="${fmt(m.early)} % zu früh, ${fmt(m.onTime)} % pünktlich, ${fmt(m.late)} % verspätet">`
-            + seg('early', m.early, 'Zu früh') + seg('on', m.onTime, 'Pünktlich') + seg('late', m.late, 'Verspätet') + '</div>';
+        return `<div class="st-bar" role="img" aria-label="${fmt(m.early)} % zu früh, ${fmt(m.onTime)} % pünktlich, ${fmt(m.slight)} % leicht verspätet, ${fmt(m.late)} % verspätet">`
+            + seg('early', m.early, 'Zu früh (ab 3 Min)') + seg('on', m.onTime, 'Pünktlich (±2 Min)')
+            + seg('slight', m.slight, 'Leicht verspätet (+3/+4)') + seg('late', m.late, 'Verspätet (ab +5)') + '</div>';
     }
 
     function trendSvg(trend) {
@@ -182,8 +183,9 @@
         } else {
             html += `<div class="st-tiles">
                 ${tile('Pünktlich', `${fmt(t.onTime)} %`, null, 'on')}
-                ${tile('Ø Abweichung', `${sign(t.avg)} Min`, t.avgLate != null ? `verspätete Halte: Ø +${fmt(t.avgLate)} Min` : null)}
-                ${tile('Verspätet', `${fmt(t.late)} %`, 'mehr als 3 Min', 'late')}
+                ${tile('Ø Abweichung', `${sign(t.avg)} Min`, t.avgLate != null ? `verspätete Halte (ab +3): Ø +${fmt(t.avgLate)} Min` : null)}
+                ${tile('Leicht verspätet', `${fmt(t.slight)} %`, '+3 bis +4 Min', 'slight')}
+                ${tile('Verspätet', `${fmt(t.late)} %`, 'ab +5 Min', 'late')}
                 ${tile('Zu früh', `${fmt(t.early)} %`, '3 Min oder mehr', 'early')}
                 ${tile('Halte gemessen', t.n.toLocaleString('de-DE'), since)}
               </div>`;
@@ -192,7 +194,7 @@
                 <div class="st-filter" role="group" aria-label="Verkehrsmittel">
                   ${[['all', 'Alle'], ['tram', 'Straßenbahn'], ['bus', 'Bus']].map(([k, l]) => `<button type="button" data-group="${k}" aria-pressed="${state.group === k}">${l}</button>`).join('')}
                 </div>
-                <div class="st-legend" aria-hidden="true"><span><i class="st-seg-early"></i>zu früh</span><span><i class="st-seg-on"></i>pünktlich</span><span><i class="st-seg-late"></i>verspätet</span></div>
+                <div class="st-legend" aria-hidden="true"><span><i class="st-seg-early"></i>zu früh</span><span><i class="st-seg-on"></i>pünktlich</span><span><i class="st-seg-slight"></i>+3/+4</span><span><i class="st-seg-late"></i>ab +5</span></div>
               </div>
               <ol class="st-lines">${lines.map((l) => `<li>
                   ${badge(l)}
@@ -202,8 +204,8 @@
                   <span class="st-max"><strong>${l.max != null ? (l.max > 0 ? '+' : '') + l.max : '–'}</strong><small>max.</small></span>
                 </li>`).join('') || '<li class="st-empty">Keine Linien in dieser Auswahl.</li>'}</ol>
               <details class="st-table"><summary>Als Tabelle</summary>
-                <table><thead><tr><th>Linie</th><th>Halte</th><th>pünktlich</th><th>verspätet</th><th>zu früh</th><th>Ø Min</th><th>max.</th></tr></thead>
-                <tbody>${lines.map((l) => `<tr><td>${esc(l.short)}</td><td>${l.n.toLocaleString('de-DE')}</td><td>${fmt(l.onTime)} %</td><td>${fmt(l.late)} %</td><td>${fmt(l.early)} %</td><td>${sign(l.avg)}</td><td>${l.max ?? '–'}</td></tr>`).join('')}</tbody></table>
+                <table><thead><tr><th>Linie</th><th>Halte</th><th>pünktlich</th><th>+3/+4</th><th>ab +5</th><th>zu früh</th><th>Ø Min</th><th>max.</th></tr></thead>
+                <tbody>${lines.map((l) => `<tr><td>${esc(l.short)}</td><td>${l.n.toLocaleString('de-DE')}</td><td>${fmt(l.onTime)} %</td><td>${fmt(l.slight)} %</td><td>${fmt(l.late)} %</td><td>${fmt(l.early)} %</td><td>${sign(l.avg)}</td><td>${l.max ?? '–'}</td></tr>`).join('')}</tbody></table>
               </details>`;
         }
         html += disruptionsHtml(d.disruptions || [], d);

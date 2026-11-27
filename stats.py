@@ -13,7 +13,8 @@ import threading
 import time
 
 H_MIN, H_MAX = -5, 15          # histogram: delay in whole minutes, clipped to this range
-ON_TIME = (-2, 3)              # punctual: -2 … +3 min; early from 3 min early on, late from 4 min late
+ON_TIME = (-2, 2)              # punctual: -2 … +2 min; early from 3 min early on
+SLIGHT_MAX = 4                 # +3 / +4: slightly late; late from +5
 KEEP_DAYS = 366
 TYPES = ('tram', 'bus', 'sev')
 
@@ -191,7 +192,7 @@ class Stats:
         out_lines.sort(key=lambda l: (0 if l['type'] == 'tram' else 1, _num(l['short']), str(l['short'])))
         dl = sorted(disr.values(), key=lambda r: -(r.get('first') or 0))
         return {'lines': out_lines, 'total': _metrics(total) | {'hist': total}, 'trend': trend, 'disruptions': dl,
-                'histRange': [H_MIN, H_MAX], 'onTime': list(ON_TIME)}
+                'histRange': [H_MIN, H_MAX], 'onTime': list(ON_TIME), 'slightMax': SLIGHT_MAX}
 
     def first_day(self):
         """Oldest date with data (searches the stored months of the last year)."""
@@ -215,8 +216,8 @@ def _num(s):
 def _metrics(h):
     n = sum(h)
     if not n:
-        return {'n': 0, 'onTime': None, 'late': None, 'early': None, 'avg': None, 'avgLate': None, 'max': None}
-    on = late = early = 0
+        return {'n': 0, 'onTime': None, 'slight': None, 'late': None, 'early': None, 'avg': None, 'avgLate': None, 'max': None}
+    on = slight = late = early = 0
     s = late_sum = 0
     mx = None
     for i, c in enumerate(h):
@@ -226,14 +227,19 @@ def _metrics(h):
         s += dmin * c
         if dmin < ON_TIME[0]:
             early += c
-        elif dmin > ON_TIME[1]:
+        elif dmin > SLIGHT_MAX:
             late += c
+            late_sum += dmin * c
+        elif dmin > ON_TIME[1]:
+            slight += c
             late_sum += dmin * c
         else:
             on += c
         mx = dmin if mx is None or dmin > mx else mx
-    return {'n': n, 'onTime': round(100 * on / n, 1), 'late': round(100 * late / n, 1), 'early': round(100 * early / n, 1),
-            'avg': round(s / n, 2), 'avgLate': round(late_sum / late, 1) if late else None, 'max': mx}
+    delayed = slight + late
+    return {'n': n, 'onTime': round(100 * on / n, 1), 'slight': round(100 * slight / n, 1), 'late': round(100 * late / n, 1),
+            'early': round(100 * early / n, 1), 'avg': round(s / n, 2),
+            'avgLate': round(late_sum / delayed, 1) if delayed else None, 'max': mx}
 
 
 def _looks_done(it):

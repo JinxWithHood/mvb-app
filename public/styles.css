@@ -9324,8 +9324,8 @@ body.settings-open { overflow: hidden; }
 .hst-all { margin-top: 8px; width: 100%; min-height: 36px; border: 0; border-radius: 10px; background: var(--primary); color: #fff; font: inherit; font-weight: 800; font-size: 0.8rem; cursor: pointer; }
 
 /* ===== Pünktlichkeits-Statistik (unter der Live-Karte) ===== */
-.line-stats { --st-early: #3b82f6; --st-on: #15803d; --st-late: #e08a0b; margin-top: 16px; padding: 20px; border-radius: var(--radius-xl); }
-#app.theme-dark .line-stats { --st-late: #d97706; }
+.line-stats { --st-early: #3b82f6; --st-on: #15803d; --st-slight: #e0a30b; --st-late: #c2410c; margin-top: 16px; padding: 20px; border-radius: var(--radius-xl); }
+#app.theme-dark .line-stats { --st-slight: #ca8a04; --st-late: #dc2626; }
 .line-stats.st-busy .st-body { opacity: .55; transition: opacity .2s; }
 .st-head h2 { margin: 0; font-size: 1.2rem; color: var(--text-primary); }
 .st-sub { margin: 4px 0 0; font-size: .82rem; color: var(--text-secondary); }
@@ -9342,7 +9342,7 @@ body.settings-open { overflow: hidden; }
 .st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .st-tile { background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden; }
 .st-tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: transparent; }
-.st-tile.on::before { background: var(--st-on); } .st-tile.late::before { background: var(--st-late); } .st-tile.early::before { background: var(--st-early); }
+.st-tile.on::before { background: var(--st-on); } .st-tile.slight::before { background: var(--st-slight); } .st-tile.late::before { background: var(--st-late); } .st-tile.early::before { background: var(--st-early); }
 .st-tile-l { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); font-weight: 700; }
 .st-tile strong { font-size: 1.45rem; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .st-tile small { font-size: .74rem; color: var(--text-muted); }
@@ -9369,7 +9369,7 @@ body.settings-open { overflow: hidden; }
 .st-badge.dark { color: #111; }
 .st-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface); }
 .st-bar > span { display: block; min-width: 3px; }
-.st-seg-early { background: var(--st-early); } .st-seg-on { background: var(--st-on); } .st-seg-late { background: var(--st-late); }
+.st-seg-early { background: var(--st-early); } .st-seg-on { background: var(--st-on); } .st-seg-slight { background: var(--st-slight); } .st-seg-late { background: var(--st-late); }
 .st-pct, .st-avg, .st-max { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .st-pct strong, .st-avg strong, .st-max strong { color: var(--text-primary); font-size: .92rem; }
 .st-pct small, .st-avg small, .st-max small { color: var(--text-muted); font-size: .68rem; }

@@ -68,10 +68,12 @@ class CollectTests(unittest.TestCase):
 
     def test_early_only_from_three_minutes(self):
         h = [0] * (stats.H_MAX - stats.H_MIN + 1)
-        for d in (-2, -3, -4, 3, 4):
+        for d in (-2, -3, -4, 2, 3, 4, 5, 9):
             h[d - stats.H_MIN] += 1
         m = stats._metrics(h)
-        self.assertEqual((m['early'], m['onTime'], m['late']), (40.0, 40.0, 20.0))   # -3/-4 early, -2/+3 on time, +4 late
+        # -3/-4 early · -2/+2 on time · +3/+4 slightly late · +5/+9 late
+        self.assertEqual((m['early'], m['onTime'], m['slight'], m['late']), (25.0, 25.0, 25.0, 25.0))
+        self.assertEqual(m['avgLate'], 5.2)                                          # (3+4+5+9)/4
 
     def test_done_words(self):
         self.assertTrue(stats._looks_done({'title': 'ERLEDIGT: Störung Linie 1'}))
