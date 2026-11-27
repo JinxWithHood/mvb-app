@@ -87,8 +87,8 @@ class FahrtenschreiberTests(unittest.TestCase):
         self.assertEqual(v['1309']['last']['line'], '6')
         self.assertEqual(v['1309']['with'], ['1310'])
         csv = self.c.get('/api/fts/export.csv').data.decode('utf-8-sig')
-        self.assertIn('Datum;Tagesart;Uhrzeit;Linie;Kurs;Wagen;Ort;Richtung', csv)
-        self.assertIn('07:31;4;;1309+1310;;Cracau', csv)
+        self.assertIn('Datum;Tagesart;Uhrzeit;Linie;Kurs;Wagen;Typ;Ort;Richtung', csv)
+        self.assertIn('07:31;4;;1309+1310;NGT8D;;Cracau', csv)
 
     def test_day_types(self):
         f, D = self.f, datetime.date
@@ -112,7 +112,7 @@ class FahrtenschreiberTests(unittest.TestCase):
         self.assertEqual(rows[0]['vehicles'][0][0], '1309')
         csv = self.c.get('/api/fts/export.csv').data.decode('utf-8-sig')
         self.assertIn('Kurs', csv.splitlines()[0])
-        self.assertIn(';4/03;1309+1310;Alter Markt;Cracau;06:12', csv)
+        self.assertIn(';4/03;1309+1310;NGT8D;Alter Markt;Cracau;06:12', csv)
 
     def test_live_guess_by_course_same_day_type_only(self):
         f, D = self.f, datetime.date
@@ -131,7 +131,7 @@ class FahrtenschreiberTests(unittest.TestCase):
                 {'id': 'now2', 'type': 'tram', 'short': '4', 'direction': 'Cracau', 'start': '07:00'},
                 {'id': 'x', 'type': 'tram', 'short': '4', 'direction': 'Cracau', 'start': '05:01'}]
         g = f.guess_live(live, fri, now_hm='06:30')
-        self.assertEqual(g['now1'], {'vehicles': ['1309', '1310'], 'kurs': '4/03', 'sure': False, 'seen': '05:20', 'stop': 'Hasselbachplatz'})
+        self.assertEqual(g['now1'], {'vehicles': ['1309', '1310'], 'type': 'NGT8D', 'kurs': '4/03', 'sure': False, 'seen': '05:20', 'stop': 'Hasselbachplatz'})
         self.assertNotIn('now2', g)                                   # trip never reported → nothing guessed
         self.assertTrue(g['x']['sure'])                               # reported directly for this very trip
         # on a Saturday the same 06:12 trip is another Kurs
@@ -147,6 +147,25 @@ class FahrtenschreiberTests(unittest.TestCase):
         with mock.patch.dict(self.b._line_shapes, {'loaded': True, 'lines': {'tram:4': {'stops': {'Magdeburg, C': [52.125, 11.6], 'A': [52.101, 11.6]},
                                                                                          'shapes': {'x': {'pts': shape}}}}}):
             self.assertEqual(self.c.get('/api/fts/stops?line=4').get_json()['stops'], ['A', 'C'])
+
+    def test_vehicle_types_and_analysis(self):
+        f = self.f
+        self.assertEqual((f.vehicle_type('1309'), f.vehicle_type('1412'), f.vehicle_type('1201')), ('NGT8D', 'Flexity', 'andere'))
+        self.assertEqual(f.composition(['1309', '1310']), 'NGT8D')
+        self.assertEqual(f.composition(['1309', '1412']), 'gemischt')
+        self.add(line='4', vehicles=['1309', '1310'])
+        self.add(line='4', vehicles=['1412'], time='08:00')
+        self.add(line='9', vehicles=['1405'], time='08:10')
+        e = self.c.get('/api/fts/entries').get_json()['entries']
+        self.assertIn(['Flexity'], [x['types'] for x in e])
+        a = self.c.get('/api/fts/analysis').get_json()
+        self.assertEqual(a['n'], 3)
+        self.assertEqual((a['total']['Flexity'], a['total']['NGT8D'], a['double']), (2, 1, 1))
+        l4 = next(l for l in a['lines'] if l['line'] == '4')
+        self.assertEqual((l4['n'], l4['types']['Flexity'], l4['types']['NGT8D'], l4['vehicles']), (2, 1, 1, 3))
+        self.assertEqual(dict(a['byType']['Flexity']), {'4': 1, '9': 1})
+        self.assertEqual(a['fleet'], {'NGT8D': 2, 'Flexity': 2})
+        self.assertIn('Typ', self.c.get('/api/fts/export.csv').data.decode('utf-8-sig').splitlines()[0])
 
     def test_rate_limit(self):
         codes = [self.add(time=f'07:{i:02d}').status_code for i in range(22)]

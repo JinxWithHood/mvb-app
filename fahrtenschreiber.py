@@ -34,6 +34,29 @@ MAX_PER_MINUTE = 20
 VEHICLE_RE = re.compile(r'^[0-9]{2,5}[A-Za-z]?$')
 KURS_RE = re.compile(r'^[0-9A-Za-z][0-9A-Za-z/ .-]{0,9}$')
 DAY_TYPES = {'wt': 'Werktag', 'sa': 'Samstag', 'so': 'Sonn- & Feiertag'}
+# Fahrzeugtyp aus der Wagennummer (Bereich von–bis). Neue Baureihen hier ergänzen – alte Einträge
+# werden automatisch mit eingeordnet, weil der Typ erst beim Auswerten bestimmt wird.
+VEHICLE_TYPES = [
+    (1301, 1399, 'NGT8D'),
+    (1401, 1499, 'Flexity'),
+]
+OTHER_TYPE = 'andere'
+
+
+def vehicle_type(num):
+    m = re.match(r'^(\d+)', str(num or ''))
+    if m:
+        n = int(m.group(1))
+        for lo, hi, name in VEHICLE_TYPES:
+            if lo <= n <= hi:
+                return name
+    return OTHER_TYPE
+
+
+def composition(vehicles):
+    """'Flexity', 'NGT8D' – or 'gemischt' when a coupled set has different types."""
+    types = {vehicle_type(v) for v in vehicles or []}
+    return types.pop() if len(types) == 1 else ('gemischt' if types else OTHER_TYPE)
 _live_cache = {'ts': 0.0, 'data': None}
 
 
@@ -163,6 +186,7 @@ def _device():
 
 def _public(e, device, admin):
     out = {k: v for k, v in e.items() if k != 'dev'}
+    out['types'] = [vehicle_type(v) for v in e.get('vehicles') or []]
     out['mine'] = bool(admin or (device and e.get('dev') == device))
     return out
 
@@ -233,11 +257,13 @@ def guess_live(vehicles, today, now_hm=None):
             if c:
                 kurs = max(c.items(), key=lambda kv: kv[1])[0]
         if direct:
-            out[v['id']] = {'vehicles': direct['vehicles'], 'kurs': kurs, 'sure': True, 'seen': direct['time'], 'stop': direct.get('stop', '')}
+            out[v['id']] = {'vehicles': direct['vehicles'], 'type': composition(direct['vehicles']), 'kurs': kurs, 'sure': True,
+                            'seen': direct['time'], 'stop': direct.get('stop', '')}
             continue
         if kurs:
             same = next((e for e in today_list if e['line'] == line and e.get('kurs') == kurs), None)
-            out[v['id']] = {'vehicles': same['vehicles'] if same else [], 'kurs': kurs, 'sure': False,
+            out[v['id']] = {'vehicles': same['vehicles'] if same else [], 'type': composition(same['vehicles']) if same else '',
+                            'kurs': kurs, 'sure': False,
                             'seen': same['time'] if same else '', 'stop': same.get('stop', '') if same else ''}
     return out
 
@@ -303,7 +329,10 @@ def init(app, backend_module):
         line = _norm_line(request.args.get('line'))
         dt = request.args.get('dayType') or ''
         today = _today()
-        items = [e for e in _entries(today - datetime.timedelta(days=365), today) if e.get('kurs')]
+        d_to = _parse_day(request.args.get('to'), today) or today
+        d_from = _parse_day(request.args.get('from'), d_to - datetime.timedelta(days=365)) or d_to - datetime.timedelta(days=365)
+        d_from = max(d_from, d_to - datetime.timedelta(days=370))
+        items = [e for e in _entries(d_from, d_to) if e.get('kurs')]
         if line:
             items = [e for e in items if e.get('line') == line]
         if dt in DAY_TYPES:
@@ -316,6 +345,9 @@ def init(app, backend_module):
             r['count'] += 1
             for v in e.get('vehicles') or []:
                 r['vehicles'][v] = r['vehicles'].get(v, 0) + 1
+            r.setdefault('types', {})
+            comp = composition(e.get('vehicles'))
+            r['types'][comp] = r['types'].get(comp, 0) + 1
             if e.get('start'):
                 sig = f"{e['start']} {e.get('origin') or ''} → {e.get('direction') or ''}".strip()
                 r['trips'][sig] = r['trips'].get(sig, 0) + 1
@@ -325,11 +357,12 @@ def init(app, backend_module):
         for r in out.values():
             ts = sorted(r.pop('times'))
             r['span'] = [ts[0], ts[-1]] if ts else None
-            r['vehicles'] = sorted(r['vehicles'].items(), key=lambda kv: -kv[1])[:6]
+            r['vehicles'] = [[v, n, vehicle_type(v)] for v, n in sorted(r['vehicles'].items(), key=lambda kv: -kv[1])[:6]]
+            r['types'] = sorted((r.get('types') or {}).items(), key=lambda kv: -kv[1])
             r['trips'] = sorted(r['trips'].items())[:40]
             rows.append(r)
         rows.sort(key=lambda r: (r['line'].zfill(4), r['dayType'], r['kurs'].zfill(8)))
-        return jsonify({'courses': rows})
+        return jsonify({'courses': rows, 'from': d_from.isoformat(), 'to': d_to.isoformat(), 'dayTypes': DAY_TYPES})
 
     @app.route('/api/fts/live')
     def fts_live():
@@ -460,7 +493,7 @@ def init(app, backend_module):
         out = {}
         for e in reversed(items):                       # oldest first, so "last" ends up newest
             for v in e.get('vehicles') or []:
-                r = out.setdefault(v, {'vehicle': v, 'count': 0, 'lines': {}, 'first': e['date'], 'last': None, 'with': {}})
+                r = out.setdefault(v, {'vehicle': v, 'type': vehicle_type(v), 'count': 0, 'lines': {}, 'first': e['date'], 'last': None, 'with': {}})
                 r['count'] += 1
                 r['lines'][e['line']] = r['lines'].get(e['line'], 0) + 1
                 r['last'] = {'date': e['date'], 'time': e['time'], 'line': e['line'], 'direction': e.get('direction', ''),
@@ -474,6 +507,50 @@ def init(app, backend_module):
             r['with'] = [k for k, _ in sorted(r['with'].items(), key=lambda kv: -kv[1])[:3]]
         return jsonify({'days': days, 'vehicles': rows})
 
+    @app.route('/api/fts/analysis')
+    def fts_analysis():
+        """Wo fährt was: Fahrzeugtypen je Linie (Anteil der gemeldeten Fahrten), Doppeltraktionen, Tagesarten."""
+        today = _today()
+        days = {'30': 30, '90': 90, 'year': 365}.get(request.args.get('range') or '90', 90)
+        dt = request.args.get('dayType') or ''
+        items = _entries(today - datetime.timedelta(days=days - 1), today)
+        if dt in DAY_TYPES:
+            items = [e for e in items if (e.get('dayType') or day_type(datetime.date.fromisoformat(e['date']))) == dt]
+        names = [t[2] for t in VEHICLE_TYPES] + ['gemischt', OTHER_TYPE]
+        total = {n: 0 for n in names}
+        lines, by_type, hours = {}, {n: {} for n in names}, {n: [0] * 24 for n in names}
+        doubles = 0
+        for e in items:
+            comp = composition(e.get('vehicles'))
+            total[comp] += 1
+            dbl = len(e.get('vehicles') or []) > 1
+            doubles += dbl
+            r = lines.setdefault(e['line'], {'line': e['line'], 'type': e.get('type') or _line_type(e['line']), 'n': 0,
+                                             'types': {n: 0 for n in names}, 'double': 0, 'vehicles': set()})
+            r['n'] += 1
+            r['types'][comp] += 1
+            r['double'] += dbl
+            r['vehicles'].update(e.get('vehicles') or [])
+            by_type[comp][e['line']] = by_type[comp].get(e['line'], 0) + 1
+            try:
+                hours[comp][int(e['time'][:2])] += 1
+            except (ValueError, KeyError):
+                pass
+        rows = []
+        for r in lines.values():
+            r['vehicles'] = len(r['vehicles'])
+            rows.append(r)
+        rows.sort(key=lambda r: ({'tram': 0, 'night': 1, 'sev': 2, 'bus': 3}.get(r['type'], 4), int(re.sub(r'\D', '', r['line']) or 0)))
+        fleet = {}
+        for e in items:
+            for v in e.get('vehicles') or []:
+                fleet.setdefault(vehicle_type(v), set()).add(v)
+        return jsonify({'days': days, 'dayType': dt if dt in DAY_TYPES else '', 'n': len(items), 'double': doubles,
+                        'types': names, 'ranges': [{'from': lo, 'to': hi, 'type': t} for lo, hi, t in VEHICLE_TYPES],
+                        'total': total, 'lines': rows,
+                        'byType': {n: sorted(v.items(), key=lambda kv: -kv[1]) for n, v in by_type.items()},
+                        'hours': hours, 'fleet': {k: len(v) for k, v in fleet.items()}})
+
     @app.route('/api/fts/export.csv')
     def fts_export():
         today = _today()
@@ -481,11 +558,12 @@ def init(app, backend_module):
         d_from = _parse_day(request.args.get('from'), today - datetime.timedelta(days=365)) or today - datetime.timedelta(days=365)
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=';')
-        w.writerow(['Datum', 'Tagesart', 'Uhrzeit', 'Linie', 'Kurs', 'Wagen', 'Ort', 'Richtung', 'Start der Fahrt',
+        w.writerow(['Datum', 'Tagesart', 'Uhrzeit', 'Linie', 'Kurs', 'Wagen', 'Typ', 'Ort', 'Richtung', 'Start der Fahrt',
                     'Verspätung (Min)', 'Notiz'])
         for e in sorted(_entries(d_from, d_to), key=lambda e: (e['date'], e['time'])):
             dt = e.get('dayType') or day_type(datetime.date.fromisoformat(e['date']))
             w.writerow([e['date'], DAY_TYPES.get(dt, dt), e['time'], e['line'], e.get('kurs', ''), '+'.join(e.get('vehicles') or []),
+                        composition(e.get('vehicles')),
                         e.get('stop', ''), e.get('direction', ''), f"{e.get('start', '')} {e.get('origin', '')}".strip(),
                         '' if e.get('delay') is None else e['delay'], e.get('note', '')])
         data = '﻿' + buf.getvalue()                 # BOM: Excel opens umlauts correctly

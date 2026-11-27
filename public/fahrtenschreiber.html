@@ -25,7 +25,9 @@
   .top p { margin: 2px 0 0; opacity: .85; font-size: .88rem; }
   main { max-width: 920px; margin: 0 auto; padding: 16px 14px calc(40px + env(safe-area-inset-bottom)); }
   .tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 4px; margin-bottom: 14px; position: sticky; top: 8px; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
-  .tabs button { flex: 1; border: 0; background: none; padding: 9px 10px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 1 0 auto; border: 0; background: none; padding: 9px 10px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
   .tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
   .card h2 { margin: 0 0 12px; font-size: 1.05rem; }
@@ -62,8 +64,8 @@
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 10px 2px; }
   .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .filters .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
-  .filters .seg button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
+  .filters .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+  .filters .seg button { white-space: nowrap; flex: none; border: 0; background: none; padding: 6px 12px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
   .filters .seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
   .day { margin: 16px 0 6px; font-weight: 800; color: var(--muted); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
   .entry { display: grid; grid-template-columns: 56px 50px 1fr auto; gap: 10px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--border); }
@@ -95,6 +97,35 @@
   .pick button mark { background: none; color: var(--primary); font-weight: 800; }
   .dark .pick button mark { color: #4ade80; }
   .pick .none { padding: 10px; color: var(--muted); }
+  /* vehicle types – categorical slots (validated), "andere" neutral grey + hatched */
+  :root { --vt-flexity: #257de0; --vt-ngt8d: #f47230; }
+  .dark { --vt-flexity: #338ced; --vt-ngt8d: #e76624; }
+  .vt-Flexity { background: var(--vt-flexity); } .vt-NGT8D { background: var(--vt-ngt8d); }
+  .vt-gemischt { background: repeating-linear-gradient(90deg, var(--vt-flexity) 0 6px, var(--vt-ngt8d) 6px 12px); }
+  .vt-andere { background: repeating-linear-gradient(135deg, #94a3b8 0 3px, transparent 3px 6px), rgba(148,163,184,.25); }
+  .vtag { display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; font-weight: 800; color: var(--muted); margin-left: 6px; }
+  .vtag i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; position: relative; overflow: hidden; }
+  .tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+  .tile.Flexity::before { background: var(--vt-flexity); } .tile.NGT8D::before { background: var(--vt-ngt8d); }
+  .tile span { display: block; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .tile strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+  .tile small { display: block; color: var(--soft); font-size: .74rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .8rem; color: var(--muted); margin: 6px 0 8px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .arow { display: grid; grid-template-columns: 46px 1fr 70px; gap: 10px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--border); }
+  .abar { display: flex; gap: 2px; height: 22px; border-radius: 5px; overflow: hidden; background: var(--surface); }
+  .abar > span { display: flex; align-items: center; justify-content: center; min-width: 3px; color: #fff; font-size: .72rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+  .abar > span.vt-andere { color: var(--text); text-shadow: none; }
+  .arow .an { text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+  .arow .an small { display: block; font-weight: 600; color: var(--soft); font-size: .7rem; }
+  .where { display: grid; gap: 10px; margin-top: 16px; }
+  .where > div { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+  .where h3 { margin: 0 0 6px; font-size: .95rem; display: flex; align-items: center; gap: 8px; }
+  .where h3 i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+  .where .ls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .where .ls span.c { color: var(--muted); font-size: .8rem; margin-left: -2px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
   .grid2 input { width: 100%; }
   .dtype { font-size: .8rem; font-weight: 800; padding: 5px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
@@ -106,6 +137,8 @@
   .ktrip { font-variant-numeric: tabular-nums; }
   @media (max-width: 560px) {
     .grid2 { grid-template-columns: 1fr; }
+    .tabs button { padding: 9px 9px; font-size: .9rem; }
+    .filters .seg button { padding: 6px 10px; }
     .entry { grid-template-columns: 46px 44px 1fr auto; gap: 8px; }
     .hide-s { display: none; }
   }
@@ -127,6 +160,7 @@
     <button role="tab" data-tab="list" aria-selected="false">Fahrten</button>
     <button role="tab" data-tab="veh" aria-selected="false">Wagen</button>
     <button role="tab" data-tab="kurs" aria-selected="false">Kurse</button>
+    <button role="tab" data-tab="ana" aria-selected="false">Auswertung</button>
   </nav>
 
   <section id="tab-add">
@@ -207,11 +241,31 @@
         <div class="seg" role="group" aria-label="Tagesart">
           <button data-dt="wt" aria-pressed="true">Werktag</button>
           <button data-dt="sa" aria-pressed="false">Samstag</button>
-          <button data-dt="so" aria-pressed="false">Sonn-/Feiertag</button>
+          <button data-dt="so" aria-pressed="false" title="Sonn- und Feiertage">Sonntag</button>
         </div>
       </div>
       <p class="hint" style="margin-top:0">Am Wochenende und an Feiertagen fährt ein anderer Takt – Kurse und Fahrzeiten werden deshalb je Tagesart getrennt gesammelt.</p>
       <div id="kursList"></div>
+    </div>
+  </section>
+
+  <section id="tab-ana" hidden>
+    <div class="card">
+      <h2>Wo fährt was?</h2>
+      <div class="filters" style="margin-bottom:12px">
+        <div class="seg" role="group" aria-label="Zeitraum">
+          <button data-arange="30" aria-pressed="false">30 Tage</button>
+          <button data-arange="90" aria-pressed="true">90 Tage</button>
+          <button data-arange="year" aria-pressed="false">Jahr</button>
+        </div>
+        <div class="seg" role="group" aria-label="Tagesart">
+          <button data-adt="" aria-pressed="true">Alle</button>
+          <button data-adt="wt" aria-pressed="false">Werktag</button>
+          <button data-adt="sa" aria-pressed="false">Samstag</button>
+          <button data-adt="so" aria-pressed="false" title="Sonn- und Feiertage">Sonntag</button>
+        </div>
+      </div>
+      <div id="anaBody"></div>
     </div>
   </section>
 
@@ -257,6 +311,12 @@
     const c = state.colors[line] || '#64748b';
     return `<span class="badge ${type === 'bus' || type === 'night' ? type : ''}${lum(c) > 170 ? ' light' : ''}" style="--lc:${esc(c)}">${esc(line)}</span>`;
   }
+  function typeTag(types) {
+    const u = [...new Set(types || [])];
+    if (!u.length) return '';
+    const t = u.length === 1 ? u[0] : 'gemischt';
+    return `<span class="vtag"><i class="vt-${esc(t)}"></i>${esc(t === 'andere' ? 'Typ ?' : t)}</span>`;
+  }
   function delayTxt(d) {
     if (d == null) return '';
     return d > 0 ? `<span class="late">+${d}</span>` : d < 0 ? `<span class="early">${d}</span>` : '<span class="ok">pünktlich</span>';
@@ -266,7 +326,10 @@
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   function showTab(tab) {
     document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === tab)));
-    ['add', 'list', 'veh', 'kurs'].forEach((t) => { $('tab-' + t).hidden = t !== tab; });
+    const act = document.querySelector(`.tabs button[data-tab="${tab}"]`);
+    if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    ['add', 'list', 'veh', 'kurs', 'ana'].forEach((t) => { $('tab-' + t).hidden = t !== tab; });
+    if (tab === 'ana') loadAnalysis();
     if (tab === 'list') loadList();
     if (tab === 'veh') loadVehicles();
     if (tab === 'kurs') loadCourses();
@@ -466,7 +529,7 @@
     return `<div class="entry">
       <span class="t">${esc(e.time)}</span>
       ${badge(e.line, e.type)}
-      <div class="info"><div class="vchips">${e.kurs ? `<span class="kurs" title="Kurs">Kurs ${esc(e.kurs)}</span>` : ''}${(e.vehicles || []).map((v) => `<button type="button" class="vchip" data-veh="${esc(v)}" title="Alle Fahrten von Wagen ${esc(v)}">${esc(v)}</button>`).join('<span class="plus">+</span>')}</div>
+      <div class="info"><div class="vchips">${e.kurs ? `<span class="kurs" title="Kurs">Kurs ${esc(e.kurs)}</span>` : ''}${(e.vehicles || []).map((v) => `<button type="button" class="vchip" data-veh="${esc(v)}" title="Alle Fahrten von Wagen ${esc(v)}">${esc(v)}</button>`).join('<span class="plus">+</span>')}${typeTag(e.types)}</div>
         <small>${e.stop ? `📍 ${esc(e.stop)}` : ''}${e.direction ? `${e.stop ? ' · ' : ''}→ ${esc(e.direction)}` : ''}${e.delay != null ? ' · ' + delayTxt(e.delay) : ''}${e.note ? ` · ${esc(e.note)}` : ''}</small></div>
       ${e.mine ? `<button type="button" class="del" data-id="${esc(e.id)}" data-month="${month}" aria-label="Eintrag löschen" title="Löschen">🗑</button>` : '<span></span>'}
     </div>`;
@@ -542,8 +605,9 @@
     const q = $('vehSearch').value.trim();
     const rows = vehData.filter((r) => !q || r.vehicle.startsWith(q));
     if (!rows.length) { $('vehList').innerHTML = '<div class="empty">Noch keine Wagen eingetragen.</div>'; return; }
-    $('vehList').innerHTML = `<table><thead><tr><th>Wagen</th><th>Fahrten</th><th>Zuletzt</th><th class="hide-s">Linien</th><th class="hide-s">oft mit</th></tr></thead><tbody>${rows.map((r) => `<tr>
+    $('vehList').innerHTML = `<table><thead><tr><th>Wagen</th><th>Typ</th><th>Fahrten</th><th>Zuletzt</th><th class="hide-s">Linien</th><th class="hide-s">oft mit</th></tr></thead><tbody>${rows.map((r) => `<tr>
         <td><button type="button" class="vchip" data-veh="${esc(r.vehicle)}">${esc(r.vehicle)}</button></td>
+        <td>${typeTag([r.type])}</td>
         <td class="num">${r.count}</td>
         <td>${badge(r.last.line, '')} <span class="muted">${esc(new Date(r.last.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }))} ${esc(r.last.time)}</span></td>
         <td class="hide-s">${r.lines.map(([l, n]) => `${esc(l)}<span class="muted">×${n}</span>`).join(' ')}</td>
@@ -565,9 +629,56 @@
       $('kursList').innerHTML = `<table><thead><tr><th>Linie</th><th>Kurs</th><th>Unterwegs</th><th>Wagen</th><th class="hide-s">Fahrten (Start)</th></tr></thead><tbody>${d.courses.map((r) => `<tr>
           <td>${badge(r.line, '')}</td><td class="num">${esc(r.kurs)}</td>
           <td class="muted">${r.span ? esc(r.span[0]) + (r.span[1] !== r.span[0] ? '–' + esc(r.span[1]) : '') : ''}<br><small>${r.count}× gemeldet</small></td>
-          <td>${r.vehicles.map(([v, n]) => `<button type="button" class="vchip" data-veh="${esc(v)}">${esc(v)}</button><span class="muted">×${n}</span>`).join(' ')}</td>
+          <td>${r.vehicles.map(([v, n]) => `<button type="button" class="vchip" data-veh="${esc(v)}">${esc(v)}</button><span class="muted">×${n}</span>`).join(' ')}${typeTag(r.types.length === 1 ? [r.types[0][0]] : r.types.map((t) => t[0]))}</td>
           <td class="hide-s ktrip">${r.trips.map(([t]) => esc(t)).join('<br>') || '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`;
     } catch (e) { $('kursList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  state.arange = '90'; state.adt = '';
+  document.querySelectorAll('[data-arange]').forEach((b) => b.addEventListener('click', () => {
+    state.arange = b.dataset.arange; document.querySelectorAll('[data-arange]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); loadAnalysis();
+  }));
+  document.querySelectorAll('[data-adt]').forEach((b) => b.addEventListener('click', () => {
+    state.adt = b.dataset.adt; document.querySelectorAll('[data-adt]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); loadAnalysis();
+  }));
+  const pct = (a, n) => (n ? Math.round(a / n * 1000) / 10 : 0);
+  const fmtPct = (v) => `${v.toLocaleString('de-DE', { maximumFractionDigits: 1 })} %`;
+  async function loadAnalysis() {
+    const box = $('anaBody');
+    box.innerHTML = '<div class="empty">Lädt …</div>';
+    let d;
+    try { d = await api(`/analysis?range=${state.arange}&dayType=${state.adt}`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+    if (!d.n) { box.innerHTML = '<div class="empty">Für diesen Zeitraum ist noch nichts eingetragen.</div>'; return; }
+    const shown = d.types.filter((t) => d.total[t] > 0);
+    const label = (t) => (t === 'andere' ? 'andere / unbekannt' : t);
+    const ranges = d.ranges.map((r) => `${String(r.from).slice(0, 2)}xx = ${r.type}`).join(' · ');
+    let html = `<div class="tiles">
+        <div class="tile"><span>Gemeldete Fahrten</span><strong>${d.n.toLocaleString('de-DE')}</strong><small>${Object.values(d.fleet).reduce((a, b) => a + b, 0)} verschiedene Wagen</small></div>
+        ${d.ranges.map((r) => `<div class="tile ${esc(r.type)}"><span>${esc(r.type)}</span><strong>${fmtPct(pct(d.total[r.type], d.n))}</strong><small>${d.total[r.type]} Fahrten · ${d.fleet[r.type] || 0} Wagen</small></div>`).join('')}
+        <div class="tile"><span>Doppeltraktion</span><strong>${fmtPct(pct(d.double, d.n))}</strong><small>${d.double} Fahrten mit 2+ Wagen</small></div>
+      </div>
+      <div class="legend" aria-hidden="true">${shown.map((t) => `<span><i class="vt-${esc(t)}"></i>${esc(label(t))}</span>`).join('')}</div>
+      <div role="list" aria-label="Fahrzeugtypen je Linie">${d.lines.map((l) => {
+        const segs = shown.map((t) => {
+          const v = pct(l.types[t], l.n);
+          return v > 0 ? `<span class="vt-${esc(t)}" style="flex-basis:${v}%" title="${esc(label(t))}: ${l.types[t]} von ${l.n} Fahrten (${fmtPct(v)})">${v >= 14 ? fmtPct(Math.round(v)) : ''}</span>` : '';
+        }).join('');
+        return `<div class="arow" role="listitem" data-kline="${esc(l.line)}" title="Kurse der Linie ${esc(l.line)} ansehen" style="cursor:pointer">${badge(l.line, l.type)}<div class="abar" role="img" aria-label="${shown.map((t) => `${label(t)} ${fmtPct(pct(l.types[t], l.n))}`).join(', ')}">${segs}</div>
+          <span class="an">${l.n}<small>${l.n === 1 ? 'Fahrt' : 'Fahrten'}${l.double ? ` · ${l.double}× Doppel` : ''}</small></span></div>`;
+      }).join('')}</div>
+      <div class="where">${shown.filter((t) => d.byType[t].length).map((t) => `<div><h3><i class="vt-${esc(t)}"></i>${esc(label(t))} fährt auf</h3>
+          <div class="ls">${d.byType[t].map(([line, n]) => `${badge(line, '')}<span class="c">${fmtPct(pct(n, d.total[t]))}</span>`).join(' ')}</div></div>`).join('')}</div>
+      <details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-weight:700">Als Tabelle</summary>
+        <table><thead><tr><th>Linie</th><th>Fahrten</th>${shown.map((t) => `<th>${esc(label(t))}</th>`).join('')}<th>Doppel</th><th>Wagen</th></tr></thead>
+        <tbody>${d.lines.map((l) => `<tr><td>${esc(l.line)}</td><td class="num">${l.n}</td>${shown.map((t) => `<td>${l.types[t]} <span class="muted">(${fmtPct(pct(l.types[t], l.n))})</span></td>`).join('')}<td>${l.double}</td><td>${l.vehicles}</td></tr>`).join('')}</tbody></table>
+      </details>
+      <p class="hint">Typ aus der Wagennummer: ${esc(ranges)}. Anteil = gemeldete Fahrten, nicht alle Fahrten – je mehr eingetragen wird, desto genauer. Linie antippen → ihre Kurse.</p>`;
+    box.innerHTML = html;
+    box.querySelectorAll('[data-kline]').forEach((r) => r.addEventListener('click', () => {
+      $('kursLine').value = r.dataset.kline;
+      if (state.adt) { state.dt = state.adt; document.querySelectorAll('[data-dt]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.dt === state.dt))); }
+      showTab('kurs');
+    }));
   }
 
   // ---------- start ----------
@@ -588,7 +699,7 @@
     validate();
     loadRecent();
     const tab = (location.hash || '').slice(1);
-    if (['list', 'veh', 'kurs'].includes(tab)) showTab(tab);
+    if (['list', 'veh', 'kurs', 'ana'].includes(tab)) showTab(tab);
     const q = new URLSearchParams(location.search);
     const ql = (q.get('line') || '').toUpperCase();
     if (ql) {

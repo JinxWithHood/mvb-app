@@ -537,7 +537,7 @@
         if (!f) return '';
         const w = (f.vehicles || []).join(' + ');
         const parts = [];
-        if (w) parts.push(`<b>Wagen ${escapeHtml(w)}</b>`);
+        if (w) parts.push(`<b>Wagen ${escapeHtml(w)}</b>${f.type && f.type !== 'andere' ? ` (${escapeHtml(f.type)})` : ''}`);
         if (f.kurs) parts.push(`Kurs ${escapeHtml(f.kurs)}`);
         const src = f.sure ? `gemeldet ${escapeHtml(f.seen)}${f.stop ? ' · ' + escapeHtml(f.stop) : ''}`
             : (w ? `vermutlich – Kurs heute ${escapeHtml(f.seen)} gemeldet` : 'aus früheren Meldungen');

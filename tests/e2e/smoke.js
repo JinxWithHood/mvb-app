@@ -194,6 +194,15 @@ async function openCard(page, i) {
       await page.evaluate(() => document.querySelector('#lineStats [data-range=month]').click());
       await page.waitForTimeout(800);
       check(asked.includes('month') && await page.evaluate(() => !!document.querySelector('#lineStats .st-trend path.st-line')), '[stats] month view with trend line');
+      // tap a line → its Kurse from the Fahrtenschreiber
+      await ctx.route('**/api/fts/courses?*', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ courses: [
+        { line: '52', dayType: 'wt', kurs: '52/03', count: 3, span: ['06:10', '09:40'], vehicles: [['2104', 2, 'andere'], ['2111', 1, 'andere']], types: [['andere', 3]], trips: [['06:10 Neustädter See → Lemsdorf', 1]] },
+        { line: '52', dayType: 'sa', kurs: '52/11', count: 1, span: ['08:00', '08:00'], vehicles: [['2104', 1, 'andere']], types: [['andere', 1]], trips: [] }] }) }));
+      await page.evaluate(() => document.querySelector('#lineStats li.st-line').click());
+      await page.waitForTimeout(600);
+      const kurse = await page.evaluate(() => ({ groups: document.querySelectorAll('#lineStats .st-kurse .st-kg').length, rows: document.querySelectorAll('#lineStats .st-ktab tbody tr').length,
+        expanded: document.querySelector('#lineStats li.st-line').getAttribute('aria-expanded') }));
+      check(kurse.groups === 2 && kurse.rows === 2 && kurse.expanded === 'true', '[stats] line row opens its Kurse per day type');
       if (process.env.SHOT) await page.locator('#lineStats').screenshot({ path: process.env.SHOT });
       check(errors.filter((e) => !/Leaflet|L is not defined/.test(e)).length === 0, `[stats] no JavaScript errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
       await ctx.close();

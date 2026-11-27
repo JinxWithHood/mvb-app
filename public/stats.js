@@ -13,7 +13,7 @@
     const deDate = (s, opts) => parse(s).toLocaleDateString('de-DE', opts || { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
     const lum = (hex) => { const h = (hex || '#888888').replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return 0.299 * r + 0.587 * g + 0.114 * b; };
 
-    const state = { range: 'day', date: iso(new Date()), group: 'all', data: null, loading: false, timer: null };
+    const state = { range: 'day', date: iso(new Date()), group: 'all', data: null, loading: false, timer: null, open: new Set() };
     let root = null;
 
     function apiBase() {
@@ -57,7 +57,14 @@
         root.querySelector('.st-today').addEventListener('click', () => { state.date = iso(new Date()); load(); });
         root.addEventListener('click', (e) => {
             const g = e.target.closest('[data-group]');
-            if (g) { state.group = g.dataset.group; render(); }
+            if (g) { state.group = g.dataset.group; render(); return; }
+            if (e.target.closest('a')) return;
+            const li = e.target.closest('li.st-line');
+            if (li) toggleLine(li);
+        });
+        root.addEventListener('keydown', (e) => {
+            const li = e.target.closest && e.target.closest('li.st-line');
+            if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleLine(li); }
         });
     }
 
@@ -201,13 +208,13 @@
                 </div>
                 <div class="st-legend" aria-hidden="true"><span><i class="st-seg-early"></i>zu früh</span><span><i class="st-seg-on"></i>pünktlich</span><span><i class="st-seg-slight"></i>+3/+4</span><span><i class="st-seg-late"></i>ab +5</span><span><i class="st-seg-none"></i>Ausfall / k. Wertung</span></div>
               </div>
-              <ol class="st-lines">${lines.map((l) => `<li>
+              <ol class="st-lines">${lines.map((l) => `<li class="st-line" data-line="${esc(l.short)}" tabindex="0" role="button" aria-expanded="${state.open.has(l.short)}" title="Kurse der Linie ${esc(l.short)} anzeigen">
                   ${badge(l)}
                   ${bar(l)}
                   <span class="st-pct"><strong>${fmt(l.onTime, 0)} %</strong><small>pünktlich</small></span>
                   <span class="st-avg"><strong>${sign(l.avg)}</strong><small>Ø Min</small></span>
                   <span class="st-max"><strong>${l.max != null ? (l.max > 0 ? '+' : '') + l.max : '–'}</strong><small>max.</small></span>
-                </li>`).join('') || '<li class="st-empty">Keine Linien in dieser Auswahl.</li>'}</ol>
+                </li>${state.open.has(l.short) ? `<li class="st-kurse" data-for="${esc(l.short)}"><p class="st-empty">Kurse werden geladen …</p></li>` : ''}`).join('') || '<li class="st-empty">Keine Linien in dieser Auswahl.</li>'}</ol>
               <details class="st-table"><summary>Als Tabelle</summary>
                 <table><thead><tr><th>Linie</th><th>Halte</th><th>pünktlich</th><th>+3/+4</th><th>ab +5</th><th>zu früh</th><th>Ausfall / k. W.</th><th>Ø Min</th><th>max.</th></tr></thead>
                 <tbody>${lines.map((l) => `<tr><td>${esc(l.short)}</td><td>${l.n.toLocaleString('de-DE')}</td><td>${fmt(l.onTime)} %</td><td>${fmt(l.slight)} %</td><td>${fmt(l.late)} %</td><td>${fmt(l.early)} %</td><td>${fmt(nw(l))} %</td><td>${sign(l.avg)}</td><td>${l.max ?? '–'}</td></tr>`).join('')}</tbody></table>
@@ -216,6 +223,55 @@
         html += disruptionsHtml(d.disruptions || [], d);
         body.innerHTML = html;
         if (d.range !== 'day') bindTrend(d.trend || []);
+        body.querySelectorAll('.st-kurse').forEach((li) => loadCourses(li, li.dataset.for));
+    }
+
+    // ---- Kurse einer Linie (aus dem Fahrtenschreiber): tap on a line row ----
+    const DT = { wt: 'Werktag', sa: 'Samstag', so: 'Sonn- & Feiertag' };
+    function toggleLine(li) {
+        const line = li.dataset.line;
+        const next = li.nextElementSibling;
+        if (state.open.has(line)) {
+            state.open.delete(line);
+            li.setAttribute('aria-expanded', 'false');
+            if (next && next.classList.contains('st-kurse')) next.remove();
+            return;
+        }
+        state.open.add(line);
+        li.setAttribute('aria-expanded', 'true');
+        const box = document.createElement('li');
+        box.className = 'st-kurse';
+        box.dataset.for = line;
+        box.innerHTML = '<p class="st-empty">Kurse werden geladen …</p>';
+        li.after(box);
+        loadCourses(box, line);
+    }
+    const vtag = (t) => (t && t !== 'andere' ? `<span class="st-vt st-vt-${esc(t)}">${esc(t)}</span>` : '');
+    async function loadCourses(box, line) {
+        const d = state.data;
+        try {
+            const res = await fetch(`${apiBase()}/fts/courses?line=${encodeURIComponent(line)}&from=${d.from}&to=${d.to}`, { cache: 'no-store' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Fehler');
+            const link = `<a class="st-fts" href="/Fahrtenschreiber?line=${encodeURIComponent(line)}">Im Fahrtenschreiber eintragen →</a>`;
+            if (!data.courses.length) {
+                box.innerHTML = `<p class="st-empty">Für Linie ${esc(line)} wurden in diesem Zeitraum noch keine Kurse gemeldet. ${link}</p>`;
+                return;
+            }
+            const groups = {};
+            data.courses.forEach((c) => { (groups[c.dayType] = groups[c.dayType] || []).push(c); });
+            box.innerHTML = Object.keys(DT).filter((k) => groups[k]).map((k) => `
+                <div class="st-kg"><h4>${esc(DT[k])} <small>${groups[k].length} ${groups[k].length === 1 ? 'Kurs' : 'Kurse'}</small></h4>
+                <table class="st-ktab"><thead><tr><th>Kurs</th><th>unterwegs</th><th>Wagen</th><th class="st-hide-s">Fahrten (Start)</th></tr></thead><tbody>
+                ${groups[k].map((c) => `<tr>
+                    <td class="st-kn">${esc(c.kurs)}</td>
+                    <td>${c.span ? esc(c.span[0]) + (c.span[1] !== c.span[0] ? '–' + esc(c.span[1]) : '') : ''}<small>${c.count}× gemeldet</small></td>
+                    <td>${c.vehicles.map(([v, n, t]) => `<span class="st-wg">${esc(v)}${n > 1 ? `<i>×${n}</i>` : ''}</span>`).join(' ')} ${vtag(c.types.length === 1 ? c.types[0][0] : (c.types.length ? 'gemischt' : ''))}</td>
+                    <td class="st-hide-s">${(c.trips || []).map(([t]) => esc(t)).join('<br>') || '–'}</td></tr>`).join('')}
+                </tbody></table></div>`).join('') + `<p class="st-kfoot">${link}</p>`;
+        } catch (e) {
+            box.innerHTML = '<p class="st-empty">Kurse gerade nicht abrufbar.</p>';
+        }
     }
 
     function start() {

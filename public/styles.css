@@ -9450,3 +9450,26 @@ body.settings-open { overflow: hidden; }
 .mf-fts { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--card-border); font-size: .88rem; color: var(--text-primary); }
 .mf-fts small { display: block; color: var(--text-muted); font-size: .74rem; }
 a.mf-btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* Statistik: Kurse einer Linie (Fahrtenschreiber) */
+.st-lines > li.st-line { cursor: pointer; border-radius: 8px; }
+.st-lines > li.st-line:hover, .st-lines > li.st-line:focus-visible { background: var(--surface); outline: none; }
+.st-lines > li.st-line[aria-expanded="true"] { background: var(--surface); border-bottom-color: transparent; }
+.st-lines > li.st-kurse { display: block; margin: -6px 0 6px; padding: 8px 12px 10px; background: var(--surface); border-radius: 0 0 10px 10px; border-bottom: 1px solid var(--card-border); }
+.st-kg h4 { margin: 6px 0 4px; font-size: .85rem; color: var(--text-primary); }
+.st-kg h4 small { color: var(--text-muted); font-weight: 600; margin-left: 4px; }
+.st-ktab { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.st-ktab th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); padding: 4px 6px; border-bottom: 1px solid var(--card-border); }
+.st-ktab td { padding: 6px; border-bottom: 1px solid var(--card-border); color: var(--text-primary); vertical-align: top; font-variant-numeric: tabular-nums; }
+.st-ktab td small { display: block; color: var(--text-muted); font-size: .72rem; }
+.st-kn { font-weight: 800; }
+.st-wg { display: inline-block; font-weight: 800; border: 1px solid var(--card-border); border-radius: 6px; padding: 0 6px; margin: 1px 0; background: var(--card-solid); }
+.st-wg i { font-style: normal; font-weight: 600; color: var(--text-muted); margin-left: 3px; font-size: .75rem; }
+.st-vt { display: inline-block; font-size: .7rem; font-weight: 800; border-radius: 6px; padding: 1px 6px; color: #fff; }
+.st-vt-Flexity { background: #257de0; } .st-vt-NGT8D { background: #f47230; color: #111; } .st-vt-gemischt { background: #6b7280; }
+.st-fts { color: var(--primary); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.st-kfoot { margin: 8px 0 0; font-size: .84rem; }
+@media (max-width: 560px) { .st-hide-s { display: none; } }
+.st-ktab { table-layout: fixed; }
+.st-ktab th:nth-child(1) { width: 16%; } .st-ktab th:nth-child(2) { width: 22%; } .st-ktab th:nth-child(3) { width: 30%; }
+@media (max-width: 560px) { .st-ktab th:nth-child(1) { width: 24%; } .st-ktab th:nth-child(2) { width: 34%; } .st-ktab th:nth-child(3) { width: auto; } }
