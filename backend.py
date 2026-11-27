@@ -2789,6 +2789,7 @@ def get_radar():
             next_stop, delay_min = '', None
             rt_state = 'ok'
             cancelled_stops = []
+            trip_start, trip_origin = '', ''
 
             def to_sec(v):
                 v = str(v)[-6:]
@@ -2812,6 +2813,15 @@ def get_radar():
 
             try:
                 stops_l = jny.get('stopL') or []
+                # planned departure at the first stop: together with line + direction this identifies
+                # the trip in the timetable (same every Werktag / Samstag / Sonntag) – Fahrtenschreiber
+                if stops_l:
+                    t0 = str(stops_l[0].get('dTimeS') or stops_l[0].get('aTimeS') or '')
+                    if len(t0) >= 6:
+                        trip_start = f"{t0[-6:-4]}:{t0[-4:-2]}"
+                    lx0 = stops_l[0].get('locX')
+                    if lx0 is not None and lx0 < len(loc_l):
+                        trip_origin = loc_l[lx0].get('name', '')
                 # stops this trip doesn't serve (Ausfall) – the whole trip when HAFAS says so
                 for st in stops_l:
                     if jny.get('isCncl') or st.get('aCncl') or st.get('dCncl'):
@@ -2875,6 +2885,8 @@ def get_radar():
                 'delay': delay_min,
                 'rtState': rt_state,
                 'cancelled': [c for c in cancelled_stops if c][:60],
+                'start': trip_start,
+                'origin': trip_origin,
             })
         except Exception as ex:
             print(f"[WARN] radar parse: {ex}")
@@ -5337,7 +5349,7 @@ def _stats_loop():
                 _stats_worker['last'] = now
         except Exception as ex:
             print(f"[WARN] Statistik (Fahrzeuge): {ex}")
-        if now - last_disr > 300:
+        if now - last_disr > 110:                     # Verkehrsmelder every 2 minutes
             items = _current_disruptions()
             if items is not None:
                 try:
@@ -5731,9 +5743,9 @@ def _build_disruption_map(items):
 @app.route('/api/disruptions/map')
 def api_disruptions_map():
     now = time.time()
-    if _disr_map_cache['data'] and now - _disr_map_cache['ts'] < 400:
+    if _disr_map_cache['data'] and now - _disr_map_cache['ts'] < 90:
         return jsonify(_disr_map_cache['data'])
-    items = _stats_worker['disr'] if now - _stats_worker['disr_ts'] < 600 else None
+    items = _stats_worker['disr'] if now - _stats_worker['disr_ts'] < 150 else None
     if items is None:
         items = _current_disruptions()
     if items is None:

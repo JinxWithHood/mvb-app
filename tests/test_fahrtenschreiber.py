@@ -87,8 +87,57 @@ class FahrtenschreiberTests(unittest.TestCase):
         self.assertEqual(v['1309']['last']['line'], '6')
         self.assertEqual(v['1309']['with'], ['1310'])
         csv = self.c.get('/api/fts/export.csv').data.decode('utf-8-sig')
-        self.assertIn('Datum;Uhrzeit;Linie;Wagen', csv)
-        self.assertIn('07:31;4;1309+1310;Cracau', csv)
+        self.assertIn('Datum;Tagesart;Uhrzeit;Linie;Kurs;Wagen;Ort;Richtung', csv)
+        self.assertIn('07:31;4;;1309+1310;;Cracau', csv)
+
+    def test_day_types(self):
+        f, D = self.f, datetime.date
+        self.assertEqual(f.day_type(D(2026, 11, 27)), 'wt')     # Freitag
+        self.assertEqual(f.day_type(D(2026, 11, 28)), 'sa')
+        self.assertEqual(f.day_type(D(2026, 11, 29)), 'so')
+        self.assertEqual(f.day_type(D(2026, 4, 3)), 'so')       # Karfreitag 2026
+        self.assertEqual(f.day_type(D(2026, 5, 14)), 'so')      # Himmelfahrt 2026
+        self.assertEqual(f.day_type(D(2026, 10, 31)), 'so')     # Reformationstag (Sachsen-Anhalt)
+        self.assertEqual(f.day_type(D(2026, 1, 6)), 'so')       # Heilige Drei Könige (Sachsen-Anhalt)
+        self.assertEqual(f.day_type(D(2026, 12, 24)), 'sa')
+        self.assertEqual(self.c.get('/api/fts/daytype?date=2026-11-28').get_json()['label'], 'Samstag')
+
+    def test_kurs_and_place_are_stored(self):
+        e = self.add(kurs='4/03', stop='Alter Markt', start='06:12', origin='Cracau').get_json()['entry']
+        self.assertEqual((e['kurs'], e['stop'], e['start']), ('4/03', 'Alter Markt', '06:12'))
+        self.assertIn(e['dayType'], ('wt', 'sa', 'so'))
+        self.assertEqual(self.add(kurs='!!!').status_code, 400)
+        rows = self.c.get('/api/fts/courses?line=4').get_json()['courses']
+        self.assertEqual(rows[0]['kurs'], '4/03')
+        self.assertEqual(rows[0]['vehicles'][0][0], '1309')
+        csv = self.c.get('/api/fts/export.csv').data.decode('utf-8-sig')
+        self.assertIn('Kurs', csv.splitlines()[0])
+        self.assertIn(';4/03;1309+1310;Alter Markt;Cracau;06:12', csv)
+
+    def test_live_guess_by_course_same_day_type_only(self):
+        f, D = self.f, datetime.date
+        fri, prev_fri, sat = D(2026, 11, 27), D(2026, 11, 20), D(2026, 11, 21)
+        # last Friday someone noted: the 06:12 trip from Cracau is Kurs 4/03; last Saturday the same trip was Kurs 4/11
+        self.f._months['2026-11'] = {'v': 1, 'entries': [
+            {'id': 'a', 'date': prev_fri.isoformat(), 'time': '06:40', 'dayType': 'wt', 'line': '4', 'kurs': '4/03', 'vehicles': ['1301'],
+             'direction': 'Olvenstedter Platz', 'start': '06:12', 'jid': 'old'},
+            {'id': 'b', 'date': sat.isoformat(), 'time': '06:40', 'dayType': 'sa', 'line': '4', 'kurs': '4/11', 'vehicles': ['1350'],
+             'direction': 'Olvenstedter Platz', 'start': '06:12', 'jid': 'old2'},
+            # today: Kurs 4/03 was reported earlier with Wagen 1309+1310
+            {'id': 'c', 'date': fri.isoformat(), 'time': '05:20', 'dayType': 'wt', 'line': '4', 'kurs': '4/03', 'vehicles': ['1309', '1310'],
+             'direction': 'Cracau', 'stop': 'Hasselbachplatz', 'start': '05:01', 'jid': 'x'},
+        ]}
+        live = [{'id': 'now1', 'type': 'tram', 'short': '4', 'direction': 'Olvenstedter Platz', 'start': '06:12'},
+                {'id': 'now2', 'type': 'tram', 'short': '4', 'direction': 'Cracau', 'start': '07:00'},
+                {'id': 'x', 'type': 'tram', 'short': '4', 'direction': 'Cracau', 'start': '05:01'}]
+        g = f.guess_live(live, fri, now_hm='06:30')
+        self.assertEqual(g['now1'], {'vehicles': ['1309', '1310'], 'kurs': '4/03', 'sure': False, 'seen': '05:20', 'stop': 'Hasselbachplatz'})
+        self.assertNotIn('now2', g)                                   # trip never reported → nothing guessed
+        self.assertTrue(g['x']['sure'])                               # reported directly for this very trip
+        # on a Saturday the same 06:12 trip is another Kurs
+        g_sat = f.guess_live(live[:1], D(2026, 11, 28), now_hm='06:30')
+        self.assertEqual(g_sat['now1']['kurs'], '4/11')
+        self.assertEqual(g_sat['now1']['vehicles'], [])               # nobody reported 4/11 that Saturday yet
 
     def test_rate_limit(self):
         codes = [self.add(time=f'07:{i:02d}').status_code for i in range(22)]

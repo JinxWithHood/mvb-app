@@ -9445,3 +9445,8 @@ body.settings-open { overflow: hidden; }
 .map-ulq .hst-h { box-shadow: none !important; }
 
 .dz-pop .dz-text { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Fahrtenschreiber-Hinweis in der Fahrtkarte */
+.mf-fts { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--card-border); font-size: .88rem; color: var(--text-primary); }
+.mf-fts small { display: block; color: var(--text-muted); font-size: .74rem; }
+a.mf-btn { text-decoration: none; display: inline-flex; align-items: center; }

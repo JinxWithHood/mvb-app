@@ -519,6 +519,30 @@
     // "erledigt" → the server leaves it out and the line is drawn normally again.
     // ---------------------------------------------------------
     const disr = { items: [], layer: null, timer: null, sig: '' };
+    // Fahrtenschreiber: Wagennummer / Kurs der Fahrzeuge, soweit heute jemand sie gemeldet hat
+    const fts = { data: {}, sig: '' };
+    async function loadFts() {
+        try {
+            const d = await fetch(`${opts.apiBase}/fts/live`).then(r => r.json());
+            fts.data = d.vehicles || {};
+            const sig = JSON.stringify(fts.data);
+            if (sig !== fts.sig) {
+                fts.sig = sig;
+                if (focus && focus.kind === 'trip' && fts.data[focus.id]) renderFocusCard();
+            }
+        } catch (e) { /* optional */ }
+    }
+    function ftsLine(id) {
+        const f = fts.data[id];
+        if (!f) return '';
+        const w = (f.vehicles || []).join(' + ');
+        const parts = [];
+        if (w) parts.push(`<b>Wagen ${escapeHtml(w)}</b>`);
+        if (f.kurs) parts.push(`Kurs ${escapeHtml(f.kurs)}`);
+        const src = f.sure ? `gemeldet ${escapeHtml(f.seen)}${f.stop ? ' · ' + escapeHtml(f.stop) : ''}`
+            : (w ? `vermutlich – Kurs heute ${escapeHtml(f.seen)} gemeldet` : 'aus früheren Meldungen');
+        return `<div class="mf-fts"><span aria-hidden="true">🚋</span><span>${parts.join(' · ')}<small>${src}</small></span></div>`;
+    }
 
     async function loadDisruptions() {
         if (disr.timer) clearTimeout(disr.timer);
@@ -529,8 +553,9 @@
         } catch (e) {
             console.warn('Störungen nicht verfügbar:', e);
         }
+        loadFts();
         refreshStatus();
-        if (visible) disr.timer = setTimeout(loadDisruptions, 180000);
+        if (visible) disr.timer = setTimeout(loadDisruptions, 60000);
     }
 
     // a picture for what happened (shown until the message says "erledigt")
@@ -1742,8 +1767,9 @@
             <div class="mf-title"><small>${v ? (v.type === 'fernbus' ? 'Fernbus' : vehicleGroup(v.type) === 'bus' ? 'Bus' : vehicleGroup(v.type) === 'tram' ? 'Straßenbahn' : 'Zug') + ' · Richtung' : 'Fahrt'}</small><strong>${escapeHtml(v ? v.direction : '')}</strong></div>
             ${closeBtn}</div>`;
         if (!v) return head + '<p class="mf-empty">Dieses Fahrzeug hat die Fahrt beendet.</p>';
-        if (focus.loading) return head + '<div class="mf-loading"><span class="mf-spin"></span>Linienweg wird geladen…</div>';
-        if (focus.error || !focus.entry) return head + `<p class="mf-empty">${escapeHtml(focus.error || 'Keine Daten')}</p>`;
+        const ftsHtml = ftsLine(v.id);
+        if (focus.loading) return head + ftsHtml + '<div class="mf-loading"><span class="mf-spin"></span>Linienweg wird geladen…</div>';
+        if (focus.error || !focus.entry) return head + ftsHtml + `<p class="mf-empty">${escapeHtml(focus.error || 'Keine Daten')}</p>`;
 
         const { trip, prep } = focus.entry;
         const pr = focus.progress || tripProgress(focus.entry, st);
@@ -1774,7 +1800,7 @@
                 <span class="mf-stop-name">${escapeHtml(s.name)}${changed ? ` <span class="mf-mini${darkText(s.color)}" style="background:${s.color}">ab hier ${escapeHtml(s.short)}</span>` : ''}</span>
                 ${s.delay ? delayHtml(s.delay) : ''}</li>`;
         }).join('');
-        return head + `
+        return head + ftsHtml + `
             <div class="mf-progress">
                 <div class="mf-bar" style="--grad:${runGradient(prep)}">
                     <div class="mf-rest" style="left:${pct}%"></div>${ticks}
@@ -1793,6 +1819,7 @@
                 <button class="mf-btn" data-act="journey">Live-Verlauf</button>
                 <button class="mf-btn ghost" data-act="fit">Ganze Fahrt</button>
                 ${st.key ? `<button class="mf-btn ghost" data-act="line" data-key="${escapeHtml(st.key)}">Linie ${escapeHtml(keyShort(st.key))}</button>` : ''}
+                ${['tram', 'bus', 'sev'].includes(v.type) ? `<a class="mf-btn ghost" href="/Fahrtenschreiber?line=${encodeURIComponent(v.short || '')}&trip=${encodeURIComponent(v.id)}">Wagen eintragen</a>` : ''}
             </div>`;
     }
 
@@ -1997,6 +2024,9 @@
         if (!visible) return;
         startPolling();
     };
+
+    // back to the app / tab: fetch the Verkehrsmelder state right away instead of waiting for the timer
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && visible && map) loadDisruptions(); });
 
     LiveMap.hide = function () {
         visible = false;

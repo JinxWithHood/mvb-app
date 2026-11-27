@@ -85,7 +85,17 @@
   .toast.err { background: var(--danger); color: #fff; }
   .sel { display: inline-flex; gap: 6px; align-items: center; background: color-mix(in srgb, var(--primary) 12%, var(--surface)); border: 1px solid var(--primary); border-radius: 999px; padding: 4px 6px 4px 12px; font-weight: 700; }
   .sel button { border: 0; background: none; cursor: pointer; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  .grid2 input { width: 100%; }
+  .dtype { font-size: .8rem; font-weight: 800; padding: 5px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+  .dtype.sa { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .dtype.so { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  .dark .dtype.sa { background: #3a2a07; color: #fcd34d; border-color: #78350f; }
+  .dark .dtype.so { background: #3b0d0d; color: #fca5a5; border-color: #7f1d1d; }
+  .kurs { display: inline-block; font-weight: 800; font-size: .78rem; border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; margin-right: 4px; background: var(--surface); }
+  .ktrip { font-variant-numeric: tabular-nums; }
   @media (max-width: 560px) {
+    .grid2 { grid-template-columns: 1fr; }
     .entry { grid-template-columns: 46px 44px 1fr auto; gap: 8px; }
     .hide-s { display: none; }
   }
@@ -106,6 +116,7 @@
     <button role="tab" data-tab="add" aria-selected="true">Eintragen</button>
     <button role="tab" data-tab="list" aria-selected="false">Fahrten</button>
     <button role="tab" data-tab="veh" aria-selected="false">Wagen</button>
+    <button role="tab" data-tab="kurs" aria-selected="false">Kurse</button>
   </nav>
 
   <section id="tab-add">
@@ -121,16 +132,27 @@
         <input type="date" id="fDate" aria-label="Datum">
         <input type="time" id="fTime" aria-label="Uhrzeit">
         <button type="button" class="btn small" id="nowBtn">Jetzt</button>
+        <span class="dtype" id="dayType" title="Am Wochenende und an Feiertagen fahren andere Kurse"></span>
       </div>
 
       <div id="liveBox" hidden>
         <label class="lbl">Welche Fahrt? <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">– gerade live unterwegs</span></label>
         <div class="live" id="liveList"></div>
       </div>
-      <div id="dirBox">
-        <label class="lbl" for="fDir">Richtung <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">(optional)</span></label>
-        <input type="text" id="fDir" placeholder="z. B. Reform" maxlength="80" style="width:100%">
+      <div class="grid2">
+        <div>
+          <label class="lbl" for="fStop">Wo</label>
+          <input type="text" id="fStop" placeholder="Haltestelle, z. B. Alter Markt" maxlength="80" list="stopList" autocomplete="off">
+          <datalist id="stopList"></datalist>
+        </div>
+        <div>
+          <label class="lbl" for="fDir">Richtung</label>
+          <input type="text" id="fDir" placeholder="z. B. Reform" maxlength="80">
+        </div>
       </div>
+
+      <label class="lbl" for="fKurs">Kurs <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">(falls zu sehen)</span></label>
+      <input type="text" id="fKurs" placeholder="z. B. 403 oder 4/03" maxlength="10" style="width:180px" autocomplete="off">
 
       <label class="lbl">Wagennummer</label>
       <div class="wagons" id="wagons"></div>
@@ -165,6 +187,21 @@
         <a class="btn small" id="csvBtn" href="/api/fts/export.csv" download>CSV</a>
       </div>
       <div id="list"></div>
+    </div>
+  </section>
+
+  <section id="tab-kurs" hidden>
+    <div class="card">
+      <div class="filters" style="margin-bottom:8px">
+        <select id="kursLine" aria-label="Linie"></select>
+        <div class="seg" role="group" aria-label="Tagesart">
+          <button data-dt="wt" aria-pressed="true">Werktag</button>
+          <button data-dt="sa" aria-pressed="false">Samstag</button>
+          <button data-dt="so" aria-pressed="false">Sonn-/Feiertag</button>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:0">Am Wochenende und an Feiertagen fährt ein anderer Takt – Kurse und Fahrzeiten werden deshalb je Tagesart getrennt gesammelt.</p>
+      <div id="kursList"></div>
     </div>
   </section>
 
@@ -219,16 +256,30 @@
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   function showTab(tab) {
     document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === tab)));
-    ['add', 'list', 'veh'].forEach((t) => { $('tab-' + t).hidden = t !== tab; });
+    ['add', 'list', 'veh', 'kurs'].forEach((t) => { $('tab-' + t).hidden = t !== tab; });
     if (tab === 'list') loadList();
     if (tab === 'veh') loadVehicles();
+    if (tab === 'kurs') loadCourses();
     try { history.replaceState(null, '', tab === 'add' ? location.pathname : `${location.pathname}#${tab}`); } catch (e) {}
   }
 
   // ---------- form ----------
-  function setNow() { const n = new Date(); $('fDate').value = isoDay(n); $('fTime').value = hm(n); refreshLive(); }
+  function setNow() { const n = new Date(); $('fDate').value = isoDay(n); $('fTime').value = hm(n); refreshLive(); refreshDayType(); }
   $('nowBtn').addEventListener('click', setNow);
-  $('fDate').addEventListener('change', refreshLive);
+  $('fDate').addEventListener('change', () => { refreshLive(); refreshDayType(); });
+  const DT = { wt: 'Werktag', sa: 'Samstag', so: 'Sonn- & Feiertag' };
+  async function refreshDayType() {
+    const el = $('dayType');
+    try {
+      const d = await api(`/daytype?date=${$('fDate').value}`);
+      el.textContent = d.holiday ? 'Feiertag' : d.label;
+      el.className = 'dtype ' + d.dayType;
+    } catch (e) { el.textContent = ''; }
+  }
+  async function loadStops(line) {
+    try { const d = await api(`/stops?line=${encodeURIComponent(line)}`); $('stopList').innerHTML = d.stops.map((n) => `<option value="${esc(n)}">`).join(''); }
+    catch (e) { /* free text still works */ }
+  }
   $('fTime').addEventListener('change', refreshLive);
   $('otherLine').addEventListener('input', () => { state.line = $('otherLine').value.trim().toUpperCase().replace(/\s+/g, ''); state.trip = null; refreshLive(); validate(); });
 
@@ -245,7 +296,7 @@
       $('otherLineRow').hidden = !other;
       state.line = other ? $('otherLine').value.trim().toUpperCase() : b.dataset.line;
       state.trip = null;
-      if (other) $('otherLine').focus();
+      if (other) $('otherLine').focus(); else loadStops(state.line);
       refreshLive();
       validate();
     }));
@@ -298,7 +349,7 @@
     const vs = ((liveCache.data && liveCache.data.vehicles) || []).filter((v) => String(v.short || '').toUpperCase() === state.line && ['tram', 'bus', 'sev'].includes(v.type));
     if (!vs.length) { list.innerHTML = `<div class="empty">Gerade keine Fahrt der Linie ${esc(state.line)} live zu sehen – Richtung einfach unten eintragen.</div>`; state.trip = null; return; }
     vs.sort((a, b) => String(a.direction).localeCompare(String(b.direction)) || String(a.nextStop).localeCompare(String(b.nextStop)));
-    list.innerHTML = vs.map((v, i) => `<button type="button" class="trip" data-i="${i}" aria-pressed="${state.trip && state.trip.id === v.id}">
+    list.innerHTML = vs.map((v, i) => `<button type="button" class="trip" data-i="${i}" data-id="${esc(v.id)}" aria-pressed="${state.trip && state.trip.id === v.id}">
         <strong>→ ${esc(v.direction || '?')}</strong><span class="d">${delayTxt(v.delay)}</span>
         <small>nächster Halt: ${esc(v.nextStop || '–')}</small></button>`).join('');
     list.querySelectorAll('.trip').forEach((b) => b.addEventListener('click', () => {
@@ -306,7 +357,7 @@
       const on = !(state.trip && state.trip.id === v.id);
       state.trip = on ? v : null;
       list.querySelectorAll('.trip').forEach((x) => x.setAttribute('aria-pressed', String(on && x === b)));
-      if (on) $('fDir').value = v.direction || '';
+      if (on) { $('fDir').value = v.direction || ''; $('fStop').value = v.nextStop || ''; }
     }));
   }
 
@@ -317,11 +368,12 @@
     try {
       const d = await api('/entries', { method: 'POST', body: JSON.stringify({
         line: state.line, vehicles: wagons(), date: $('fDate').value, time: $('fTime').value,
-        direction: $('fDir').value.trim(), stop: t ? t.nextStop : '', delay: t && Number.isInteger(t.delay) ? t.delay : null,
-        jid: t ? t.id : '', note: $('fNote').value.trim() }) });
+        direction: $('fDir').value.trim(), stop: $('fStop').value.trim(), kurs: $('fKurs').value.trim(),
+        delay: t && Number.isInteger(t.delay) ? t.delay : null, jid: t ? t.id : '', start: t ? (t.start || '') : '', origin: t ? (t.origin || '') : '',
+        note: $('fNote').value.trim() }) });
       toast(`Eingetragen: Linie ${d.entry.line} · Wagen ${d.entry.vehicles.join(' + ')} ✔`);
       rememberWagons(d.entry.vehicles);
-      resetWagons(); $('fNote').value = ''; state.trip = null; refreshLive();
+      resetWagons(); $('fNote').value = ''; $('fKurs').value = ''; $('fStop').value = ''; state.trip = null; refreshLive();
       loadRecent();
     } catch (e) { toast(e.message, true); }
     validate();
@@ -341,8 +393,8 @@
     return `<div class="entry">
       <span class="t">${esc(e.time)}</span>
       ${badge(e.line, e.type)}
-      <div class="info"><div class="vchips">${(e.vehicles || []).map((v) => `<button type="button" class="vchip" data-veh="${esc(v)}" title="Alle Fahrten von Wagen ${esc(v)}">${esc(v)}</button>`).join('<span class="plus">+</span>')}</div>
-        <small>${e.direction ? '→ ' + esc(e.direction) : ''}${e.stop ? ` · bei ${esc(e.stop)}` : ''}${e.delay != null ? ' · ' + delayTxt(e.delay) : ''}${e.note ? ` · ${esc(e.note)}` : ''}</small></div>
+      <div class="info"><div class="vchips">${e.kurs ? `<span class="kurs" title="Kurs">Kurs ${esc(e.kurs)}</span>` : ''}${(e.vehicles || []).map((v) => `<button type="button" class="vchip" data-veh="${esc(v)}" title="Alle Fahrten von Wagen ${esc(v)}">${esc(v)}</button>`).join('<span class="plus">+</span>')}</div>
+        <small>${e.stop ? `📍 ${esc(e.stop)}` : ''}${e.direction ? `${e.stop ? ' · ' : ''}→ ${esc(e.direction)}` : ''}${e.delay != null ? ' · ' + delayTxt(e.delay) : ''}${e.note ? ` · ${esc(e.note)}` : ''}</small></div>
       ${e.mine ? `<button type="button" class="del" data-id="${esc(e.id)}" data-month="${month}" aria-label="Eintrag löschen" title="Löschen">🗑</button>` : '<span></span>'}
     </div>`;
   }
@@ -350,7 +402,7 @@
     if (!entries.length) { box.innerHTML = '<div class="empty">Noch keine Einträge.</div>'; return; }
     let html = '', day = '';
     entries.forEach((e) => {
-      if (grouped && e.date !== day) { day = e.date; html += `<div class="day">${esc(deDay(day))}</div>`; }
+      if (grouped && e.date !== day) { day = e.date; html += `<div class="day">${esc(deDay(day))}${e.dayType && e.dayType !== 'wt' ? ` · ${esc(DT[e.dayType])}` : ''}</div>`; }
       html += entryRow(e);
     });
     box.innerHTML = html;
@@ -425,6 +477,26 @@
         <td class="hide-s">${r.with.map((w) => `<button type="button" class="vchip" data-veh="${esc(w)}">${esc(w)}</button>`).join(' ') || '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`;
   }
 
+  state.dt = 'wt';
+  document.querySelectorAll('[data-dt]').forEach((b) => b.addEventListener('click', () => {
+    state.dt = b.dataset.dt;
+    document.querySelectorAll('[data-dt]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    loadCourses();
+  }));
+  $('kursLine').addEventListener('change', loadCourses);
+  async function loadCourses() {
+    $('kursList').innerHTML = '<div class="empty">Lädt …</div>';
+    try {
+      const d = await api(`/courses?line=${encodeURIComponent($('kursLine').value)}&dayType=${state.dt}`);
+      if (!d.courses.length) { $('kursList').innerHTML = `<div class="empty">Für ${esc(DT[state.dt])} noch keine Kurse eingetragen. Beim Eintragen einfach die Kursnummer mit angeben.</div>`; return; }
+      $('kursList').innerHTML = `<table><thead><tr><th>Linie</th><th>Kurs</th><th>Unterwegs</th><th>Wagen</th><th class="hide-s">Fahrten (Start)</th></tr></thead><tbody>${d.courses.map((r) => `<tr>
+          <td>${badge(r.line, '')}</td><td class="num">${esc(r.kurs)}</td>
+          <td class="muted">${r.span ? esc(r.span[0]) + (r.span[1] !== r.span[0] ? '–' + esc(r.span[1]) : '') : ''}<br><small>${r.count}× gemeldet</small></td>
+          <td>${r.vehicles.map(([v, n]) => `<button type="button" class="vchip" data-veh="${esc(v)}">${esc(v)}</button><span class="muted">×${n}</span>`).join(' ')}</td>
+          <td class="hide-s ktrip">${r.trips.map(([t]) => esc(t)).join('<br>') || '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`;
+    } catch (e) { $('kursList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
   // ---------- start ----------
   async function start() {
     setNow();
@@ -436,11 +508,27 @@
       m.lines.forEach((l) => { state.colors[l.line] = l.color; });
       renderLineChips();
       $('lineFilter').insertAdjacentHTML('beforeend', m.lines.map((l) => `<option value="${esc(l.line)}">Linie ${esc(l.line)}</option>`).join(''));
+      $('kursLine').innerHTML = '<option value="">Alle Linien</option>' + m.lines.map((l) => `<option value="${esc(l.line)}">Linie ${esc(l.line)}</option>`).join('');
+      state.dt = m.dayType || 'wt';
+      document.querySelectorAll('[data-dt]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.dt === state.dt)));
     } catch (e) { toast('Linien konnten nicht geladen werden', true); }
     validate();
     loadRecent();
     const tab = (location.hash || '').slice(1);
-    if (tab === 'list' || tab === 'veh') showTab(tab);
+    if (['list', 'veh', 'kurs'].includes(tab)) showTab(tab);
+    const q = new URLSearchParams(location.search);
+    const ql = (q.get('line') || '').toUpperCase();
+    if (ql) {
+      const chip = $('lineChips').querySelector(`.lchip[data-line="${CSS.escape(ql)}"]`);
+      if (chip) chip.click(); else { $('lineChips').querySelector('.lchip.more').click(); $('otherLine').value = ql; state.line = ql; refreshLive(); validate(); }
+      const jid = q.get('trip');
+      if (jid) {
+        for (let i = 0; i < 20 && !$('liveList').querySelector('.trip'); i++) await new Promise((r) => setTimeout(r, 150));
+        const b = [...$('liveList').querySelectorAll('.trip')].find((x) => x.dataset.id === jid);
+        if (b) { b.click(); b.scrollIntoView({ block: 'center' }); }
+      }
+      setTimeout(() => { const w = $('wagons').querySelector('input'); if (w) w.focus(); }, 300);
+    }
   }
   start();
 })();

@@ -3,6 +3,13 @@ Magdeburg Mobil – Fahrtenschreiber
 Unter /Fahrtenschreiber trägt man ein, welcher Wagen (Wagennummer, auch Doppeltraktion) zu welcher
 Uhrzeit auf welcher Linie unterwegs war. HAFAS kennt keine Wagennummern – das hier ist Handarbeit.
 
+Ein Eintrag: Linie, Datum/Uhrzeit, Ort (Haltestelle), Kurs, Wagennummer(n), Richtung, Notiz.
+Am Wochenende und an Feiertagen fährt ein anderer Takt mit anderen Kursen – deshalb bekommt jeder
+Eintrag eine Tagesart (Werktag / Samstag / Sonn- & Feiertag) und gelernt wird nur innerhalb derselben:
+  Fahrt (Linie + Richtung + Abfahrt am Starthalt) -> Kurs   (gilt jeden Tag derselben Tagesart)
+  Kurs heute -> Wagen                                     (ein Wagen bleibt meist den ganzen Tag auf seinem Kurs)
+So zeigt die Live-Karte bei einer Bahn „Wagen 1309 · Kurs 4/03“, sobald heute irgendwer den Kurs gemeldet hat.
+
 Speicher: ein Dokument pro Monat (KV-Schlüssel fts:JJJJ-MM, dazu eine lokale Kopie).
 Löschen darf nur das Gerät, das den Eintrag angelegt hat, oder der Admin.
 """
@@ -25,6 +32,50 @@ _rate = {}                  # ip -> [timestamps]
 KEEP_MONTHS = 24
 MAX_PER_MINUTE = 20
 VEHICLE_RE = re.compile(r'^[0-9]{2,5}[A-Za-z]?$')
+KURS_RE = re.compile(r'^[0-9A-Za-z][0-9A-Za-z/ .-]{0,9}$')
+DAY_TYPES = {'wt': 'Werktag', 'sa': 'Samstag', 'so': 'Sonn- & Feiertag'}
+_live_cache = {'ts': 0.0, 'data': None}
+
+
+def _easter(y):
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l_ = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l_) // 451
+    month = (h + l_ - 7 * m + 114) // 31
+    day = (h + l_ - 7 * m + 114) % 31 + 1
+    return datetime.date(y, month, day)
+
+
+def holidays(y):
+    """Gesetzliche Feiertage in Sachsen-Anhalt."""
+    e = _easter(y)
+    td = datetime.timedelta
+    return {datetime.date(y, 1, 1), datetime.date(y, 1, 6), e - td(days=2), e + td(days=1), datetime.date(y, 5, 1),
+            e + td(days=39), e + td(days=50), datetime.date(y, 10, 3), datetime.date(y, 10, 31),
+            datetime.date(y, 12, 25), datetime.date(y, 12, 26)}
+
+
+def day_type(d):
+    """wt (Mo–Fr) · sa (Samstag, auch 24./31.12.) · so (Sonntag und Feiertag)."""
+    if d.weekday() == 6 or d in holidays(d.year):
+        return 'so'
+    if d.weekday() == 5 or (d.month == 12 and d.day in (24, 31)):
+        return 'sa'
+    return 'wt'
+
+
+def _norm_kurs(k):
+    k = re.sub(r'\s+', ' ', str(k or '')).strip()
+    return k if KURS_RE.match(k) else ''
+
+
+def _norm_dir(x):
+    return re.sub(r'^magdeburg,?\s*', '', re.sub(r'\s+', ' ', str(x or '')).strip().lower())
 LINE_RE = re.compile(r'^(?:N ?)?[0-9]{1,3}[A-Za-z]?$|^SEV ?[0-9A-Za-z]{0,4}$', re.I)
 
 
@@ -137,6 +188,40 @@ def _parse_day(s, default):
         return None
 
 
+def guess_live(vehicles, today, now_hm=None):
+    """{vehicle id: {'vehicles': [...], 'kurs': str, 'sure': bool, 'seen': 'HH:MM', 'stop': str}}"""
+    dt = day_type(today)
+    now_hm = now_hm or datetime.datetime.now(B.local_tz).strftime('%H:%M')
+    recent = _entries(today - datetime.timedelta(days=180), today)
+    today_list = [e for e in recent if e['date'] == today.isoformat() and e['time'] <= now_hm]   # newest first
+    # timetable trip -> Kurs, learned from earlier reports of the same day type
+    trip_kurs = {}
+    for e in recent:
+        if e.get('kurs') and e.get('start') and (e.get('dayType') or day_type(datetime.date.fromisoformat(e['date']))) == dt:
+            sig = (e['line'], _norm_dir(e.get('direction')), e['start'])
+            c = trip_kurs.setdefault(sig, {})
+            c[e['kurs']] = c.get(e['kurs'], 0) + 1
+    out = {}
+    for v in vehicles:
+        if v.get('type') not in ('tram', 'bus', 'sev') or not v.get('id'):
+            continue
+        line = _norm_line(v.get('short') or v.get('line'))
+        direct = next((e for e in today_list if e.get('jid') and e['jid'] == v['id']), None)
+        kurs = direct.get('kurs') if direct else ''
+        if not kurs and v.get('start'):
+            c = trip_kurs.get((line, _norm_dir(v.get('direction')), v['start']))
+            if c:
+                kurs = max(c.items(), key=lambda kv: kv[1])[0]
+        if direct:
+            out[v['id']] = {'vehicles': direct['vehicles'], 'kurs': kurs, 'sure': True, 'seen': direct['time'], 'stop': direct.get('stop', '')}
+            continue
+        if kurs:
+            same = next((e for e in today_list if e['line'] == line and e.get('kurs') == kurs), None)
+            out[v['id']] = {'vehicles': same['vehicles'] if same else [], 'kurs': kurs, 'sure': False,
+                            'seen': same['time'] if same else '', 'stop': same.get('stop', '') if same else ''}
+    return out
+
+
 def init(app, backend_module):
     global B
     B = backend_module
@@ -162,7 +247,82 @@ def init(app, backend_module):
             if re.fullmatch(r'N?\d{1,3}', k):
                 lines.append({'line': k, 'color': c, 'type': _line_type(k)})
         lines.sort(key=lambda l: ({'tram': 0, 'night': 1, 'bus': 2, 'sev': 3}[l['type']], int(re.sub(r'\D', '', l['line']) or 0)))
-        return jsonify({'lines': lines, 'today': _today().isoformat(), 'admin': bool(is_admin())})
+        today = _today()
+        return jsonify({'lines': lines, 'today': today.isoformat(), 'dayType': day_type(today), 'dayTypes': DAY_TYPES,
+                        'admin': bool(is_admin())})
+
+    @app.route('/api/fts/daytype')
+    def fts_daytype():
+        d = _parse_day(request.args.get('date'), _today())
+        if not d:
+            return jsonify({'error': 'Datum ungültig'}), 400
+        t = day_type(d)
+        return jsonify({'date': d.isoformat(), 'dayType': t, 'label': DAY_TYPES[t], 'holiday': d in holidays(d.year)})
+
+    @app.route('/api/fts/stops')
+    def fts_stops():
+        """Halte einer Linie (aus den Linienwegen der Live-Karte) für die Ort-Auswahl."""
+        line = _norm_line(request.args.get('line'))
+        names = set()
+        try:
+            B._load_line_shapes()
+            for key, e in list(B._line_shapes['lines'].items()):
+                if key.split(':', 1)[-1].upper() == line or not line:
+                    for nm in (e.get('stops') or {}):
+                        names.add(re.sub(r'^Magdeburg,\s*', '', str(nm)))
+        except Exception:
+            pass
+        return jsonify({'line': line, 'stops': sorted(names, key=str.lower)})
+
+    @app.route('/api/fts/courses')
+    def fts_courses():
+        """Kurse einer Linie je Tagesart: welche Fahrten gehören dazu, welche Wagen fuhren ihn."""
+        line = _norm_line(request.args.get('line'))
+        dt = request.args.get('dayType') or ''
+        today = _today()
+        items = [e for e in _entries(today - datetime.timedelta(days=365), today) if e.get('kurs')]
+        if line:
+            items = [e for e in items if e.get('line') == line]
+        if dt in DAY_TYPES:
+            items = [e for e in items if e.get('dayType') == dt]
+        out = {}
+        for e in reversed(items):
+            k = (e['line'], e.get('dayType') or 'wt', e['kurs'])
+            r = out.setdefault(k, {'line': k[0], 'dayType': k[1], 'kurs': k[2], 'count': 0, 'vehicles': {}, 'trips': {}, 'times': [],
+                                   'last': None})
+            r['count'] += 1
+            for v in e.get('vehicles') or []:
+                r['vehicles'][v] = r['vehicles'].get(v, 0) + 1
+            if e.get('start'):
+                sig = f"{e['start']} {e.get('origin') or ''} → {e.get('direction') or ''}".strip()
+                r['trips'][sig] = r['trips'].get(sig, 0) + 1
+            r['times'].append(e['time'])
+            r['last'] = {'date': e['date'], 'time': e['time'], 'vehicles': e.get('vehicles') or [], 'stop': e.get('stop', '')}
+        rows = []
+        for r in out.values():
+            ts = sorted(r.pop('times'))
+            r['span'] = [ts[0], ts[-1]] if ts else None
+            r['vehicles'] = sorted(r['vehicles'].items(), key=lambda kv: -kv[1])[:6]
+            r['trips'] = sorted(r['trips'].items())[:40]
+            rows.append(r)
+        rows.sort(key=lambda r: (r['line'].zfill(4), r['dayType'], r['kurs'].zfill(8)))
+        return jsonify({'courses': rows})
+
+    @app.route('/api/fts/live')
+    def fts_live():
+        """Für die Live-Karte: Wagen/Kurs der Fahrzeuge, die gerade unterwegs sind (soweit gemeldet)."""
+        now = time.time()
+        if _live_cache['data'] is not None and now - _live_cache['ts'] < 45:
+            return jsonify(_live_cache['data'])
+        try:
+            with app.test_request_context('/api/radar'):
+                resp = B.get_radar()
+            radar = resp.get_json() if not isinstance(resp, tuple) else {}
+        except Exception:
+            radar = {}
+        data = {'vehicles': guess_live((radar or {}).get('vehicles') or [], _today()), 'ts': int(now * 1000)}
+        _live_cache.update(ts=now, data=data)
+        return jsonify(data)
 
     @app.route('/api/fts/entries', methods=['GET'])
     def fts_list():
@@ -217,18 +377,28 @@ def init(app, backend_module):
         if day > today + datetime.timedelta(days=1) or day < today - datetime.timedelta(days=366):
             return jsonify({'error': 'Datum liegt außerhalb des letzten Jahres.'}), 400
         clip = lambda x, n: re.sub(r'\s+', ' ', str(x or '')).strip()[:n]
+        kurs_raw = clip(data.get('kurs'), 12)
+        kurs = _norm_kurs(kurs_raw)
+        if kurs_raw and not kurs:
+            return jsonify({'error': 'Kurs sieht nicht richtig aus (z. B. 403 oder 4/03).'}), 400
+        start = str(data.get('start') or '')
+        start = start if re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', start) else ''
         entry = {
             'id': uuid.uuid4().hex[:12],
             'date': day.isoformat(),
             'time': tm,
+            'dayType': day_type(day),
             'line': line,
             'type': _line_type(line),
+            'kurs': kurs,
             'vehicles': vehicles,
             'direction': clip(data.get('direction'), 80),
             'stop': clip(data.get('stop'), 80),
             'note': clip(data.get('note'), 240),
             'delay': data.get('delay') if isinstance(data.get('delay'), int) and -60 < data.get('delay') < 300 else None,
             'jid': clip(data.get('jid'), 120),
+            'start': start,
+            'origin': clip(data.get('origin'), 80),
             'created': int(time.time()),
             'dev': _device(),
         }
@@ -270,7 +440,8 @@ def init(app, backend_module):
                 r = out.setdefault(v, {'vehicle': v, 'count': 0, 'lines': {}, 'first': e['date'], 'last': None, 'with': {}})
                 r['count'] += 1
                 r['lines'][e['line']] = r['lines'].get(e['line'], 0) + 1
-                r['last'] = {'date': e['date'], 'time': e['time'], 'line': e['line'], 'direction': e.get('direction', '')}
+                r['last'] = {'date': e['date'], 'time': e['time'], 'line': e['line'], 'direction': e.get('direction', ''),
+                             'kurs': e.get('kurs', ''), 'stop': e.get('stop', '')}
                 for o in e.get('vehicles') or []:
                     if o != v:
                         r['with'][o] = r['with'].get(o, 0) + 1
@@ -287,10 +458,13 @@ def init(app, backend_module):
         d_from = _parse_day(request.args.get('from'), today - datetime.timedelta(days=365)) or today - datetime.timedelta(days=365)
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=';')
-        w.writerow(['Datum', 'Uhrzeit', 'Linie', 'Wagen', 'Richtung', 'Halt', 'Verspätung (Min)', 'Notiz'])
+        w.writerow(['Datum', 'Tagesart', 'Uhrzeit', 'Linie', 'Kurs', 'Wagen', 'Ort', 'Richtung', 'Start der Fahrt',
+                    'Verspätung (Min)', 'Notiz'])
         for e in sorted(_entries(d_from, d_to), key=lambda e: (e['date'], e['time'])):
-            w.writerow([e['date'], e['time'], e['line'], '+'.join(e.get('vehicles') or []), e.get('direction', ''),
-                        e.get('stop', ''), '' if e.get('delay') is None else e['delay'], e.get('note', '')])
+            dt = e.get('dayType') or day_type(datetime.date.fromisoformat(e['date']))
+            w.writerow([e['date'], DAY_TYPES.get(dt, dt), e['time'], e['line'], e.get('kurs', ''), '+'.join(e.get('vehicles') or []),
+                        e.get('stop', ''), e.get('direction', ''), f"{e.get('start', '')} {e.get('origin', '')}".strip(),
+                        '' if e.get('delay') is None else e['delay'], e.get('note', '')])
         data = '﻿' + buf.getvalue()                 # BOM: Excel opens umlauts correctly
         return Response(data, mimetype='text/csv; charset=utf-8',
                         headers={'Content-Disposition': f'attachment; filename="fahrtenschreiber-{d_from}-{d_to}.csv"'})
