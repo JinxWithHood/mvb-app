@@ -254,20 +254,30 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Fehler');
             const link = `<a class="st-fts" href="/Fahrtenschreiber?line=${encodeURIComponent(line)}">Im Fahrtenschreiber eintragen →</a>`;
-            if (!data.courses.length) {
-                box.innerHTML = `<p class="st-empty">Für Linie ${esc(line)} wurden in diesem Zeitraum noch keine Kurse gemeldet. ${link}</p>`;
+            const loose = data.withoutKurs || [];
+            if (!data.courses.length && !loose.length) {
+                box.innerHTML = `<p class="st-empty">Für Linie ${esc(line)} wurde in diesem Zeitraum noch nichts gemeldet. ${link}</p>`;
                 return;
             }
-            const groups = {};
+            const groups = {}, free = {};
             data.courses.forEach((c) => { (groups[c.dayType] = groups[c.dayType] || []).push(c); });
-            box.innerHTML = Object.keys(DT).filter((k) => groups[k]).map((k) => `
-                <div class="st-kg"><h4>${esc(DT[k])} <small>${groups[k].length} ${groups[k].length === 1 ? 'Kurs' : 'Kurse'}</small></h4>
+            loose.forEach((r) => { (free[r.dayType] = free[r.dayType] || []).push(r); });
+            const oneDay = d.from === d.to;
+            const looseRow = (r) => `<tr class="st-nokurs">
+                    <td class="st-kn st-muted">ohne Kurs</td>
+                    <td>${oneDay ? '' : esc(deDate(r.date, { day: '2-digit', month: '2-digit' })) + ' '}${esc(r.time)}${r.stop ? `<small>📍 ${esc(r.stop)}</small>` : ''}</td>
+                    <td>${r.vehicles.map(([v]) => `<span class="st-wg">${esc(v)}</span>`).join(' ')} ${vtag(r.type)}</td>
+                    <td class="st-hide-s">${r.start ? esc(`${r.start} ${r.origin || ''}`.trim()) + ' → ' : (r.direction ? '→ ' : '')}${esc(r.direction || '')}${!r.start && !r.direction ? '–' : ''}</td></tr>`;
+            box.innerHTML = Object.keys(DT).filter((k) => groups[k] || free[k]).map((k) => `
+                <div class="st-kg"><h4>${esc(DT[k])} <small>${[(groups[k] || []).length ? `${groups[k].length} ${groups[k].length === 1 ? 'Kurs' : 'Kurse'}` : '',
+                    (free[k] || []).length ? `${free[k].length} ohne Kurs` : ''].filter(Boolean).join(' · ')}</small></h4>
                 <table class="st-ktab"><thead><tr><th>Kurs</th><th>unterwegs</th><th>Wagen</th><th class="st-hide-s">Fahrten (Start)</th></tr></thead><tbody>
-                ${groups[k].map((c) => `<tr>
+                ${(groups[k] || []).map((c) => `<tr>
                     <td class="st-kn">${esc(c.kurs)}</td>
                     <td>${c.span ? esc(c.span[0]) + (c.span[1] !== c.span[0] ? '–' + esc(c.span[1]) : '') : ''}<small>${c.count}× gemeldet</small></td>
                     <td>${c.vehicles.map(([v, n, t]) => `<span class="st-wg">${esc(v)}${n > 1 ? `<i>×${n}</i>` : ''}</span>`).join(' ')} ${vtag(c.types.length === 1 ? c.types[0][0] : (c.types.length ? 'gemischt' : ''))}</td>
                     <td class="st-hide-s">${(c.trips || []).map(([t]) => esc(t)).join('<br>') || '–'}</td></tr>`).join('')}
+                ${(free[k] || []).map(looseRow).join('')}
                 </tbody></table></div>`).join('') + `<p class="st-kfoot">${link}</p>`;
         } catch (e) {
             box.innerHTML = '<p class="st-empty">Kurse gerade nicht abrufbar.</p>';

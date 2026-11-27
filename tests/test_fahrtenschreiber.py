@@ -107,12 +107,17 @@ class FahrtenschreiberTests(unittest.TestCase):
         self.assertEqual((e['kurs'], e['stop'], e['start']), ('4/03', 'Alter Markt', '06:12'))
         self.assertIn(e['dayType'], ('wt', 'sa', 'so'))
         self.assertEqual(self.add(kurs='!!!').status_code, 400)
-        rows = self.c.get('/api/fts/courses?line=4').get_json()['courses']
+        self.add(vehicles=['1412'], time='08:15', stop='Hasselbachplatz')           # no Kurs
+        d = self.c.get('/api/fts/courses?line=4').get_json()
+        rows = d['courses']
         self.assertEqual(rows[0]['kurs'], '4/03')
+        self.assertEqual(len(d['withoutKurs']), 1)
+        self.assertEqual((d['withoutKurs'][0]['time'], d['withoutKurs'][0]['type'], d['withoutKurs'][0]['stop']), ('08:15', 'Flexity', 'Hasselbachplatz'))
         self.assertEqual(rows[0]['vehicles'][0][0], '1309')
         csv = self.c.get('/api/fts/export.csv').data.decode('utf-8-sig')
         self.assertIn('Kurs', csv.splitlines()[0])
         self.assertIn(';4/03;1309+1310;NGT8D;Alter Markt;Cracau;06:12', csv)
+        self.assertIn(';1412;Flexity;Hasselbachplatz;', csv)
 
     def test_live_guess_by_course_same_day_type_only(self):
         f, D = self.f, datetime.date

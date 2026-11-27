@@ -625,12 +625,18 @@
     $('kursList').innerHTML = '<div class="empty">Lädt …</div>';
     try {
       const d = await api(`/courses?line=${encodeURIComponent($('kursLine').value)}&dayType=${state.dt}`);
-      if (!d.courses.length) { $('kursList').innerHTML = `<div class="empty">Für ${esc(DT[state.dt])} noch keine Kurse eingetragen. Beim Eintragen einfach die Kursnummer mit angeben.</div>`; return; }
+      const loose = d.withoutKurs || [];
+      if (!d.courses.length && !loose.length) { $('kursList').innerHTML = `<div class="empty">Für ${esc(DT[state.dt])} noch nichts eingetragen.</div>`; return; }
       $('kursList').innerHTML = `<table><thead><tr><th>Linie</th><th>Kurs</th><th>Unterwegs</th><th>Wagen</th><th class="hide-s">Fahrten (Start)</th></tr></thead><tbody>${d.courses.map((r) => `<tr>
           <td>${badge(r.line, '')}</td><td class="num">${esc(r.kurs)}</td>
           <td class="muted">${r.span ? esc(r.span[0]) + (r.span[1] !== r.span[0] ? '–' + esc(r.span[1]) : '') : ''}<br><small>${r.count}× gemeldet</small></td>
           <td>${r.vehicles.map(([v, n]) => `<button type="button" class="vchip" data-veh="${esc(v)}">${esc(v)}</button><span class="muted">×${n}</span>`).join(' ')}${typeTag(r.types.length === 1 ? [r.types[0][0]] : r.types.map((t) => t[0]))}</td>
-          <td class="hide-s ktrip">${r.trips.map(([t]) => esc(t)).join('<br>') || '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`;
+          <td class="hide-s ktrip">${r.trips.map(([t]) => esc(t)).join('<br>') || '<span class="muted">–</span>'}</td></tr>`).join('')}
+        ${loose.map((r) => `<tr>
+          <td>${badge(r.line, '')}</td><td class="muted" style="font-size:.8rem">ohne Kurs</td>
+          <td class="muted">${esc(new Date(r.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }))} ${esc(r.time)}${r.stop ? `<br><small>📍 ${esc(r.stop)}</small>` : ''}</td>
+          <td>${r.vehicles.map(([v]) => `<button type="button" class="vchip" data-veh="${esc(v)}">${esc(v)}</button>`).join(' ')}${typeTag([r.type])}</td>
+          <td class="hide-s ktrip">${r.start ? esc(`${r.start} ${r.origin || ''}`.trim()) + ' → ' : (r.direction ? '→ ' : '')}${esc(r.direction || '') || (r.start ? '' : '<span class="muted">–</span>')}</td></tr>`).join('')}</tbody></table>`;
     } catch (e) { $('kursList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }
 

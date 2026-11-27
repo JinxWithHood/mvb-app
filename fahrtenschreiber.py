@@ -332,11 +332,19 @@ def init(app, backend_module):
         d_to = _parse_day(request.args.get('to'), today) or today
         d_from = _parse_day(request.args.get('from'), d_to - datetime.timedelta(days=365)) or d_to - datetime.timedelta(days=365)
         d_from = max(d_from, d_to - datetime.timedelta(days=370))
-        items = [e for e in _entries(d_from, d_to) if e.get('kurs')]
+        items = _entries(d_from, d_to)
         if line:
             items = [e for e in items if e.get('line') == line]
         if dt in DAY_TYPES:
-            items = [e for e in items if e.get('dayType') == dt]
+            items = [e for e in items if (e.get('dayType') or day_type(datetime.date.fromisoformat(e['date']))) == dt]
+        # reports without a Kurs are shown too – one row each
+        loose = [{'line': e['line'], 'dayType': e.get('dayType') or day_type(datetime.date.fromisoformat(e['date'])),
+                  'date': e['date'], 'time': e['time'], 'vehicles': [[v, vehicle_type(v)] for v in e.get('vehicles') or []],
+                  'type': composition(e.get('vehicles')), 'stop': e.get('stop', ''), 'direction': e.get('direction', ''),
+                  'start': e.get('start', ''), 'origin': e.get('origin', '')}
+                 for e in items if not e.get('kurs')][:300]
+        loose.sort(key=lambda r: (r['date'], r['time']))
+        items = [e for e in items if e.get('kurs')]
         out = {}
         for e in reversed(items):
             k = (e['line'], e.get('dayType') or 'wt', e['kurs'])
@@ -362,7 +370,7 @@ def init(app, backend_module):
             r['trips'] = sorted(r['trips'].items())[:40]
             rows.append(r)
         rows.sort(key=lambda r: (r['line'].zfill(4), r['dayType'], r['kurs'].zfill(8)))
-        return jsonify({'courses': rows, 'from': d_from.isoformat(), 'to': d_to.isoformat(), 'dayTypes': DAY_TYPES})
+        return jsonify({'courses': rows, 'withoutKurs': loose, 'from': d_from.isoformat(), 'to': d_to.isoformat(), 'dayTypes': DAY_TYPES})
 
     @app.route('/api/fts/live')
     def fts_live():

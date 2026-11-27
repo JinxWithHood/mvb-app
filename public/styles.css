@@ -9473,3 +9473,4 @@ a.mf-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .st-ktab { table-layout: fixed; }
 .st-ktab th:nth-child(1) { width: 16%; } .st-ktab th:nth-child(2) { width: 22%; } .st-ktab th:nth-child(3) { width: 30%; }
 @media (max-width: 560px) { .st-ktab th:nth-child(1) { width: 24%; } .st-ktab th:nth-child(2) { width: 34%; } .st-ktab th:nth-child(3) { width: auto; } }
+.st-nokurs .st-muted { color: var(--text-muted); font-weight: 600; font-size: .78rem; }
