@@ -9370,10 +9370,10 @@ body.settings-open { overflow: hidden; }
 .st-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface); }
 .st-bar > span { display: block; min-width: 3px; }
 .st-seg-early { background: var(--st-early); } .st-seg-on { background: var(--st-on); } .st-seg-slight { background: var(--st-slight); }
-.st-seg-cnl { background: #475569; }
+/* Ausfall and keine Wertung: both grey hatched (no realtime to judge by) – only the hatch direction differs */
+.st-seg-cnl { background: repeating-linear-gradient(45deg, #94a3b8 0 3px, transparent 3px 6px), rgba(148, 163, 184, .25); }
 .st-seg-none { background: repeating-linear-gradient(135deg, #94a3b8 0 3px, transparent 3px 6px), rgba(148, 163, 184, .25); }
-#app.theme-dark .st-seg-cnl { background: #94a3b8; }
-.st-tile.cnl::before { background: #475569; }
+.st-tile.cnl::before { background: repeating-linear-gradient(45deg, #94a3b8 0 3px, transparent 3px 6px); }
 .st-seg-late { background: var(--st-late); }
 .st-pct, .st-avg, .st-max { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .st-pct strong, .st-avg strong, .st-max strong { color: var(--text-primary); font-size: .92rem; }
