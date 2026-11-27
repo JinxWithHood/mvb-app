@@ -188,6 +188,26 @@ def _parse_day(s, default):
         return None
 
 
+def order_along(stops, shapes):
+    """Stop names sorted by their position along the longest shape (one direction of the line)."""
+    def d2(a, b):
+        return (a[0] - b[0]) ** 2 + ((a[1] - b[1]) * 0.615) ** 2
+    if not shapes:
+        return sorted(stops, key=str.lower)
+    main = max(shapes, key=len)
+    cum = [0.0]
+    for a, b in zip(main, main[1:]):
+        cum.append(cum[-1] + d2(a, b) ** 0.5)
+    pos = {}
+    for nm, ll in stops.items():
+        try:
+            i = min(range(len(main)), key=lambda k: d2(main[k], ll))
+            pos[nm] = cum[i]
+        except (TypeError, IndexError):
+            pos[nm] = float('inf')
+    return sorted(stops, key=lambda n: (pos[n], n.lower()))
+
+
 def guess_live(vehicles, today, now_hm=None):
     """{vehicle id: {'vehicles': [...], 'kurs': str, 'sure': bool, 'seen': 'HH:MM', 'stop': str}}"""
     dt = day_type(today)
@@ -261,18 +281,21 @@ def init(app, backend_module):
 
     @app.route('/api/fts/stops')
     def fts_stops():
-        """Halte einer Linie (aus den Linienwegen der Live-Karte) für die Ort-Auswahl."""
+        """Halte einer Linie in Fahrtreihenfolge (entlang ihres längsten Linienwegs) für die Ort-Suche."""
         line = _norm_line(request.args.get('line'))
-        names = set()
+        if not line:
+            return jsonify({'line': '', 'stops': []})
+        stops, shapes = {}, []
         try:
             B._load_line_shapes()
             for key, e in list(B._line_shapes['lines'].items()):
-                if key.split(':', 1)[-1].upper() == line or not line:
-                    for nm in (e.get('stops') or {}):
-                        names.add(re.sub(r'^Magdeburg,\s*', '', str(nm)))
+                if key.split(':', 1)[-1].upper() == line:
+                    for nm, ll in (e.get('stops') or {}).items():
+                        stops.setdefault(re.sub(r'^Magdeburg,\s*', '', str(nm)), ll)
+                    shapes += [s_.get('pts') for s_ in (e.get('shapes') or {}).values() if s_.get('pts')]
         except Exception:
             pass
-        return jsonify({'line': line, 'stops': sorted(names, key=str.lower)})
+        return jsonify({'line': line, 'stops': order_along(stops, shapes)})
 
     @app.route('/api/fts/courses')
     def fts_courses():

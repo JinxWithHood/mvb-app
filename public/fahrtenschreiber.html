@@ -85,6 +85,16 @@
   .toast.err { background: var(--danger); color: #fff; }
   .sel { display: inline-flex; gap: 6px; align-items: center; background: color-mix(in srgb, var(--primary) 12%, var(--surface)); border: 1px solid var(--primary); border-radius: 999px; padding: 4px 6px 4px 12px; font-weight: 700; }
   .sel button { border: 0; background: none; cursor: pointer; color: var(--muted); }
+  .pickwrap { position: relative; }
+  .pick { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 10; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.22); max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+  .pick-h { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--soft); padding: 6px 10px 4px; }
+  .pick button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: none; padding: 9px 10px; border-radius: 8px; cursor: pointer; min-height: 40px; }
+  .pick button .n { position: relative; width: 14px; height: 14px; flex: none; border-radius: 50%; border: 3px solid var(--lc, var(--primary)); background: var(--card); }
+  .pick button .n::before { content: ''; position: absolute; left: 50%; top: -14px; bottom: -14px; width: 3px; transform: translateX(-50%); background: var(--lc, var(--primary)); z-index: -1; opacity: .5; }
+  .pick button.act, .pick button:hover { background: var(--surface); }
+  .pick button mark { background: none; color: var(--primary); font-weight: 800; }
+  .dark .pick button mark { color: #4ade80; }
+  .pick .none { padding: 10px; color: var(--muted); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
   .grid2 input { width: 100%; }
   .dtype { font-size: .8rem; font-weight: 800; padding: 5px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
@@ -140,10 +150,10 @@
         <div class="live" id="liveList"></div>
       </div>
       <div class="grid2">
-        <div>
+        <div class="pickwrap">
           <label class="lbl" for="fStop">Wo</label>
-          <input type="text" id="fStop" placeholder="Haltestelle, z. B. Alter Markt" maxlength="80" list="stopList" autocomplete="off">
-          <datalist id="stopList"></datalist>
+          <input type="search" id="fStop" placeholder="Haltestelle suchen …" maxlength="80" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="stopPick" aria-autocomplete="list">
+          <div class="pick" id="stopPick" role="listbox" hidden></div>
         </div>
         <div>
           <label class="lbl" for="fDir">Richtung</label>
@@ -276,12 +286,75 @@
       el.className = 'dtype ' + d.dayType;
     } catch (e) { el.textContent = ''; }
   }
+  // ---- stop search: the stops of the chosen line in route order, filtered while typing ----
+  let lineStops = [], pickIdx = -1;
+  const fold = (x) => String(x || '').toLowerCase().replace(/^magdeburg,?\s*/, '').replace(/ß/g, 'ss').replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u')
+    .replace(/str\b\.?/g, 'strasse').replace(/[^a-z0-9]+/g, ' ').trim();
   async function loadStops(line) {
-    try { const d = await api(`/stops?line=${encodeURIComponent(line)}`); $('stopList').innerHTML = d.stops.map((n) => `<option value="${esc(n)}">`).join(''); }
-    catch (e) { /* free text still works */ }
+    lineStops = [];
+    if (!line) return;
+    try { lineStops = (await api(`/stops?line=${encodeURIComponent(line)}`)).stops || []; } catch (e) { /* free text still works */ }
+    if (document.activeElement === $('fStop')) showPick();
   }
+  function stopMatches(q) {
+    const words = fold(q).split(' ').filter(Boolean);
+    if (!words.length) return lineStops.map((n) => ({ n, score: 0 }));
+    return lineStops.map((n, i) => {
+      const f = fold(n), toks = f.split(' ');
+      if (!words.every((w) => f.includes(w))) return null;
+      const starts = words.filter((w) => toks.some((t) => t.startsWith(w))).length;
+      return { n, score: (f.startsWith(words[0]) ? 0 : 1) + (words.length - starts) * 0.5 + i / 1000 };
+    }).filter(Boolean).sort((a, b) => a.score - b.score);
+  }
+  function mark(name, q) {
+    const words = fold(q).split(' ').filter(Boolean);
+    if (!words.length) return esc(name);
+    // highlight on the folded text, mapped back 1:1 where possible
+    let out = esc(name);
+    words.forEach((w) => {
+      const re = new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').split('').join('[^a-z0-9äöüß]?') + ')', 'i');
+      out = out.replace(re, '<mark>$1</mark>');
+    });
+    return out;
+  }
+  function showPick() {
+    const box = $('stopPick'), q = $('fStop').value;
+    if (!lineStops.length) { box.hidden = true; $('fStop').setAttribute('aria-expanded', 'false'); return; }
+    const list = stopMatches(q);
+    const inOrder = !fold(q);
+    const col = state.colors[state.line] || '';
+    pickIdx = list.length && !inOrder ? 0 : -1;
+    box.innerHTML = `<div class="pick-h">${inOrder ? `Halte der Linie ${esc(state.line)} – in Fahrtreihenfolge` : `${list.length} ${list.length === 1 ? 'Treffer' : 'Treffer'}`}</div>`
+      + (list.length ? list.map((m, i) => `<button type="button" role="option" data-n="${esc(m.n)}" class="${i === pickIdx ? 'act' : ''}" style="${col ? `--lc:${esc(col)}` : ''}"><span class="n"></span><span>${mark(m.n, q)}</span></button>`).join('')
+        : '<div class="none">Kein Halt der Linie passt – du kannst den Ort auch frei eintippen.</div>');
+    box.hidden = false;
+    $('fStop').setAttribute('aria-expanded', 'true');
+  }
+  function hidePick() { $('stopPick').hidden = true; $('fStop').setAttribute('aria-expanded', 'false'); }
+  function choose(name) { $('fStop').value = name; hidePick(); }
+  $('fStop').addEventListener('focus', showPick);
+  $('fStop').addEventListener('input', showPick);
+  $('fStop').addEventListener('blur', () => setTimeout(hidePick, 150));
+  $('fStop').addEventListener('keydown', (e) => {
+    const btns = [...$('stopPick').querySelectorAll('button')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!btns.length) return;
+      pickIdx = (pickIdx + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length;
+      btns.forEach((b, i) => b.classList.toggle('act', i === pickIdx));
+      btns[pickIdx].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      if (!$('stopPick').hidden && btns[pickIdx]) { e.preventDefault(); choose(btns[pickIdx].dataset.n); }
+    } else if (e.key === 'Escape') hidePick();
+  });
+  $('stopPick').addEventListener('mousedown', (e) => e.preventDefault());   // keep the focus in the field
+  $('stopPick').addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (b) choose(b.dataset.n); });
   $('fTime').addEventListener('change', refreshLive);
-  $('otherLine').addEventListener('input', () => { state.line = $('otherLine').value.trim().toUpperCase().replace(/\s+/g, ''); state.trip = null; refreshLive(); validate(); });
+  let olT = null;
+  $('otherLine').addEventListener('input', () => {
+    state.line = $('otherLine').value.trim().toUpperCase().replace(/\s+/g, ''); state.trip = null; refreshLive(); validate();
+    clearTimeout(olT); olT = setTimeout(() => loadStops(state.line), 400);
+  });
 
   function renderLineChips() {
     const main = state.lines.filter((l) => l.type === 'tram');

@@ -139,6 +139,15 @@ class FahrtenschreiberTests(unittest.TestCase):
         self.assertEqual(g_sat['now1']['kurs'], '4/11')
         self.assertEqual(g_sat['now1']['vehicles'], [])               # nobody reported 4/11 that Saturday yet
 
+    def test_stops_in_route_order(self):
+        shape = [[52.10, 11.60], [52.11, 11.60], [52.12, 11.60], [52.13, 11.60]]
+        stops = {'C': [52.125, 11.6001], 'A': [52.101, 11.6], 'B': [52.112, 11.5999]}
+        self.assertEqual(self.f.order_along(stops, [shape[:2], shape]), ['A', 'B', 'C'])
+        self.assertEqual(self.f.order_along({'b': [0, 0], 'a': [0, 0]}, []), ['a', 'b'])
+        with mock.patch.dict(self.b._line_shapes, {'loaded': True, 'lines': {'tram:4': {'stops': {'Magdeburg, C': [52.125, 11.6], 'A': [52.101, 11.6]},
+                                                                                         'shapes': {'x': {'pts': shape}}}}}):
+            self.assertEqual(self.c.get('/api/fts/stops?line=4').get_json()['stops'], ['A', 'C'])
+
     def test_rate_limit(self):
         codes = [self.add(time=f'07:{i:02d}').status_code for i in range(22)]
         self.assertIn(429, codes)
