@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fahrtenschreiber – Magdeburg Mobil</title>
+<meta name="theme-color" content="#018e4a">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<script>
+  try { if ((localStorage.getItem('theme') || '') === 'dark' || (!localStorage.getItem('theme') && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark'); } catch (e) {}
+</script>
+<style>
+  :root { --primary: #018e4a; --primary-d: #016b38; --bg: #eef2ef; --card: #ffffff; --surface: #f4f7f5; --border: #dbe3de; --text: #0f1a14; --muted: #5b6b62; --soft: #8a978f; --danger: #dc2626; --focus: #22c55e; --radius: 14px; }
+  .dark { --bg: #070b09; --card: #111a15; --surface: #18231d; --border: #26342c; --text: #e8f0eb; --muted: #9fb1a6; --soft: #6f8278; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  header.top { background: linear-gradient(135deg, #016b38, #018e4a); color: #fff; padding: calc(14px + env(safe-area-inset-top)) 18px 18px; }
+  .top-in { max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
+  .top a.back { color: #fff; text-decoration: none; font-weight: 700; background: rgba(255,255,255,.15); border-radius: 10px; padding: 7px 11px; white-space: nowrap; }
+  .top h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.01em; }
+  .top p { margin: 2px 0 0; opacity: .85; font-size: .88rem; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px 14px calc(40px + env(safe-area-inset-bottom)); }
+  .tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 4px; margin-bottom: 14px; position: sticky; top: 8px; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .tabs button { flex: 1; border: 0; background: none; padding: 9px 10px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .card h2 { margin: 0 0 12px; font-size: 1.05rem; }
+  label.lbl { display: block; font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  label.lbl:first-child { margin-top: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lchip { min-width: 44px; height: 38px; padding: 0 10px; border-radius: 9px; border: 2px solid transparent; background: var(--lc); color: #fff; font-weight: 800; cursor: pointer; }
+  .lchip.bus { border-radius: 19px; }
+  .lchip.light { color: #111; }
+  .lchip[aria-pressed="true"] { outline: 3px solid var(--text); outline-offset: 2px; }
+  .lchip.more { background: var(--surface); color: var(--text); border: 1px dashed var(--border); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=date], input[type=time], input[type=search], select, textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; min-height: 42px; }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  textarea { width: 100%; min-height: 60px; resize: vertical; }
+  .btn { border: 0; border-radius: 10px; padding: 10px 16px; min-height: 42px; font-weight: 800; cursor: pointer; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn.primary:disabled { opacity: .5; cursor: default; }
+  .btn.small { min-height: 34px; padding: 6px 11px; font-size: .85rem; }
+  .wagons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .wagon { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .wagon input { border: 0; background: none; width: 92px; font-size: 1.15rem; font-weight: 800; letter-spacing: .04em; text-align: center; min-height: 44px; }
+  .wagon button { border: 0; background: none; width: 34px; height: 44px; color: var(--soft); cursor: pointer; font-size: 1.1rem; }
+  .plus { color: var(--muted); font-weight: 900; }
+  .hint { font-size: .8rem; color: var(--soft); margin-top: 6px; }
+  .live { display: grid; gap: 6px; }
+  .trip { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; background: var(--surface); border: 2px solid var(--border); border-radius: 12px; padding: 9px 12px; cursor: pointer; }
+  .trip[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--surface)); }
+  .trip strong { font-size: .95rem; }
+  .trip small { grid-column: 1; color: var(--muted); }
+  .trip .d { grid-row: span 2; align-self: center; font-weight: 800; }
+  .late { color: #c2410c; } .early { color: #2563eb; } .ok { color: #15803d; }
+  .dark .late { color: #f97316; } .dark .early { color: #60a5fa; } .dark .ok { color: #4ade80; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 10px 2px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .filters .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+  .filters .seg button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; font-weight: 700; color: var(--muted); cursor: pointer; }
+  .filters .seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+  .day { margin: 16px 0 6px; font-weight: 800; color: var(--muted); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+  .entry { display: grid; grid-template-columns: 56px 50px 1fr auto; gap: 10px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+  .entry .t { font-weight: 800; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 28px; padding: 0 6px; border-radius: 7px; background: var(--lc); color: #fff; font-weight: 800; font-size: .9rem; }
+  .badge.bus, .badge.night { border-radius: 14px; }
+  .badge.light { color: #111; }
+  .vchips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .vchip { border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 1px 8px; font-weight: 800; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .entry .info small { display: block; color: var(--muted); font-size: .82rem; }
+  .del { border: 0; background: none; color: var(--soft); cursor: pointer; font-size: 1.1rem; width: 36px; height: 36px; border-radius: 8px; }
+  .del:hover { color: var(--danger); background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  td.num { font-variant-numeric: tabular-nums; font-weight: 800; }
+  .toast { opacity: 0; pointer-events: none; position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120px); background: var(--text); color: var(--bg); padding: 11px 18px; border-radius: 12px; font-weight: 700; transition: transform .25s, opacity .25s; z-index: 20; max-width: 90vw; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.err { background: var(--danger); color: #fff; }
+  .sel { display: inline-flex; gap: 6px; align-items: center; background: color-mix(in srgb, var(--primary) 12%, var(--surface)); border: 1px solid var(--primary); border-radius: 999px; padding: 4px 6px 4px 12px; font-weight: 700; }
+  .sel button { border: 0; background: none; cursor: pointer; color: var(--muted); }
+  @media (max-width: 560px) {
+    .entry { grid-template-columns: 46px 44px 1fr auto; gap: 8px; }
+    .hide-s { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="back" href="/">← App</a>
+    <div>
+      <h1>Fahrtenschreiber</h1>
+      <p>Welcher Wagen fuhr wann auf welcher Linie?</p>
+    </div>
+  </div>
+</header>
+<main>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="add" aria-selected="true">Eintragen</button>
+    <button role="tab" data-tab="list" aria-selected="false">Fahrten</button>
+    <button role="tab" data-tab="veh" aria-selected="false">Wagen</button>
+  </nav>
+
+  <section id="tab-add">
+    <div class="card">
+      <label class="lbl">Linie</label>
+      <div class="chips" id="lineChips"></div>
+      <div class="row" id="otherLineRow" style="margin-top:8px" hidden>
+        <input type="text" id="otherLine" placeholder="Linie, z. B. 73 oder N9" maxlength="6" style="width:200px">
+      </div>
+
+      <label class="lbl">Wann</label>
+      <div class="row">
+        <input type="date" id="fDate" aria-label="Datum">
+        <input type="time" id="fTime" aria-label="Uhrzeit">
+        <button type="button" class="btn small" id="nowBtn">Jetzt</button>
+      </div>
+
+      <div id="liveBox" hidden>
+        <label class="lbl">Welche Fahrt? <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">– gerade live unterwegs</span></label>
+        <div class="live" id="liveList"></div>
+      </div>
+      <div id="dirBox">
+        <label class="lbl" for="fDir">Richtung <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">(optional)</span></label>
+        <input type="text" id="fDir" placeholder="z. B. Reform" maxlength="80" style="width:100%">
+      </div>
+
+      <label class="lbl">Wagennummer</label>
+      <div class="wagons" id="wagons"></div>
+      <div class="hint">Die Nummer steht vorn, hinten und an der Seite des Wagens. Fährt eine Doppeltraktion, „+ Wagen“ antippen.</div>
+      <datalist id="knownWagons"></datalist>
+
+      <label class="lbl" for="fNote">Notiz <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:600">(optional)</span></label>
+      <textarea id="fNote" maxlength="240" placeholder="z. B. Werbung, Sonderlackierung, Fahrschule …"></textarea>
+
+      <div class="row" style="margin-top:14px; justify-content:space-between">
+        <span class="muted" id="sumLine"></span>
+        <button type="button" class="btn primary" id="saveBtn" disabled>Eintragen</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Zuletzt eingetragen</h2>
+      <div id="recent"></div>
+    </div>
+  </section>
+
+  <section id="tab-list" hidden>
+    <div class="card">
+      <div class="filters">
+        <div class="seg" role="group" aria-label="Zeitraum">
+          <button data-span="0" aria-pressed="true">Heute</button>
+          <button data-span="6" aria-pressed="false">7 Tage</button>
+          <button data-span="29" aria-pressed="false">30 Tage</button>
+          <button data-span="365" aria-pressed="false">Jahr</button>
+        </div>
+        <select id="lineFilter" aria-label="Linie"><option value="">Alle Linien</option></select>
+        <input type="search" id="vehFilter" placeholder="Wagen suchen" inputmode="numeric" style="width:150px">
+        <a class="btn small" id="csvBtn" href="/api/fts/export.csv" download>CSV</a>
+      </div>
+      <div id="list"></div>
+    </div>
+  </section>
+
+  <section id="tab-veh" hidden>
+    <div class="card">
+      <div class="filters" style="margin-bottom:8px">
+        <div class="seg" role="group" aria-label="Zeitraum">
+          <button data-vrange="90" aria-pressed="true">90 Tage</button>
+          <button data-vrange="year" aria-pressed="false">Jahr</button>
+        </div>
+        <input type="search" id="vehSearch" placeholder="Wagen suchen" inputmode="numeric" style="width:150px">
+      </div>
+      <div id="vehList"></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const pad = (n) => String(n).padStart(2, '0');
+  const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const lum = (hex) => { const h = (hex || '#888888').replace('#', ''); return 0.299 * parseInt(h.slice(0, 2), 16) + 0.587 * parseInt(h.slice(2, 4), 16) + 0.114 * parseInt(h.slice(4, 6), 16); };
+  const deDay = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }); };
+
+  let device = '';
+  try { device = localStorage.getItem('fts_device') || ''; if (!device) { device = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/[^A-Za-z0-9]/g, '').slice(0, 32); localStorage.setItem('fts_device', device); } } catch (e) { device = 'nostorage' + Date.now(); }
+  const api = (path, opts = {}) => fetch('/api/fts' + path, { ...opts, headers: { 'X-Device': device, ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) } })
+    .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `Fehler ${r.status}`); return d; });
+
+  const state = { lines: [], colors: {}, line: '', trip: null, span: 0, vrange: '90' };
+  let toastT = null;
+  function toast(msg, err) {
+    const t = $('toast');
+    t.textContent = msg; t.className = 'toast show' + (err ? ' err' : '');
+    clearTimeout(toastT); toastT = setTimeout(() => { t.className = 'toast' + (err ? ' err' : ''); }, 2600);
+  }
+  function badge(line, type) {
+    const c = state.colors[line] || '#64748b';
+    return `<span class="badge ${type === 'bus' || type === 'night' ? type : ''}${lum(c) > 170 ? ' light' : ''}" style="--lc:${esc(c)}">${esc(line)}</span>`;
+  }
+  function delayTxt(d) {
+    if (d == null) return '';
+    return d > 0 ? `<span class="late">+${d}</span>` : d < 0 ? `<span class="early">${d}</span>` : '<span class="ok">pünktlich</span>';
+  }
+
+  // ---------- tabs ----------
+  document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  function showTab(tab) {
+    document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === tab)));
+    ['add', 'list', 'veh'].forEach((t) => { $('tab-' + t).hidden = t !== tab; });
+    if (tab === 'list') loadList();
+    if (tab === 'veh') loadVehicles();
+    try { history.replaceState(null, '', tab === 'add' ? location.pathname : `${location.pathname}#${tab}`); } catch (e) {}
+  }
+
+  // ---------- form ----------
+  function setNow() { const n = new Date(); $('fDate').value = isoDay(n); $('fTime').value = hm(n); refreshLive(); }
+  $('nowBtn').addEventListener('click', setNow);
+  $('fDate').addEventListener('change', refreshLive);
+  $('fTime').addEventListener('change', refreshLive);
+  $('otherLine').addEventListener('input', () => { state.line = $('otherLine').value.trim().toUpperCase().replace(/\s+/g, ''); state.trip = null; refreshLive(); validate(); });
+
+  function renderLineChips() {
+    const main = state.lines.filter((l) => l.type === 'tram');
+    const night = state.lines.filter((l) => l.type === 'night');
+    $('lineChips').innerHTML = [...main, ...night].map((l) => {
+      const c = l.color;
+      return `<button type="button" class="lchip ${l.type === 'tram' ? '' : 'bus'}${lum(c) > 170 ? ' light' : ''}" style="--lc:${esc(c)}" data-line="${esc(l.line)}" aria-pressed="false">${esc(l.line)}</button>`;
+    }).join('') + '<button type="button" class="lchip more" data-line="" aria-pressed="false">Bus / andere</button>';
+    $('lineChips').querySelectorAll('.lchip').forEach((b) => b.addEventListener('click', () => {
+      $('lineChips').querySelectorAll('.lchip').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      const other = !b.dataset.line;
+      $('otherLineRow').hidden = !other;
+      state.line = other ? $('otherLine').value.trim().toUpperCase() : b.dataset.line;
+      state.trip = null;
+      if (other) $('otherLine').focus();
+      refreshLive();
+      validate();
+    }));
+  }
+
+  function wagonInput(value) {
+    const w = document.createElement('div');
+    w.className = 'wagon';
+    w.innerHTML = `<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="z. B. 1309" list="knownWagons" aria-label="Wagennummer"><button type="button" aria-label="Wagen entfernen">×</button>`;
+    const inp = w.querySelector('input');
+    inp.value = value || '';
+    inp.addEventListener('input', () => { inp.value = inp.value.replace(/[^0-9A-Za-z]/g, ''); validate(); });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('saveBtn').click(); } });
+    w.querySelector('button').addEventListener('click', () => { if ($('wagons').querySelectorAll('.wagon').length > 1) { w.remove(); } else { inp.value = ''; } renderPlus(); validate(); });
+    return w;
+  }
+  function renderPlus() {
+    const box = $('wagons');
+    box.querySelectorAll('.plus, .addw').forEach((x) => x.remove());
+    const ws = [...box.querySelectorAll('.wagon')];
+    ws.slice(1).forEach((w) => { const p = document.createElement('span'); p.className = 'plus'; p.textContent = '+'; box.insertBefore(p, w); });
+    if (ws.length < 4) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn small addw'; b.textContent = '+ Wagen';
+      b.addEventListener('click', () => { const w = wagonInput(''); box.insertBefore(w, b); renderPlus(); w.querySelector('input').focus(); });
+      box.appendChild(b);
+    }
+  }
+  function resetWagons() { $('wagons').innerHTML = ''; $('wagons').appendChild(wagonInput('')); renderPlus(); }
+  const wagons = () => [...$('wagons').querySelectorAll('.wagon input')].map((i) => i.value.trim()).filter(Boolean);
+
+  function validate() {
+    const ok = !!state.line && wagons().length > 0 && $('fDate').value && $('fTime').value;
+    $('saveBtn').disabled = !ok;
+    $('sumLine').textContent = ok ? `Linie ${state.line} · Wagen ${wagons().join(' + ')}` : (state.line ? 'Wagennummer fehlt' : 'Linie wählen');
+  }
+
+  // live trips of the chosen line (only when the time is about now)
+  let liveCache = { ts: 0, data: null };
+  async function refreshLive() {
+    const box = $('liveBox'), list = $('liveList');
+    const when = new Date(`${$('fDate').value}T${$('fTime').value || '00:00'}`);
+    const near = Math.abs(Date.now() - when.getTime()) < 25 * 60000;
+    if (!state.line || !near) { box.hidden = true; state.trip = null; return; }
+    box.hidden = false;
+    if (!liveCache.data || Date.now() - liveCache.ts > 20000) {
+      list.innerHTML = '<div class="empty">Live-Fahrten werden geladen …</div>';
+      try { liveCache = { ts: Date.now(), data: await fetch('/api/radar').then((r) => r.json()) }; } catch (e) { list.innerHTML = '<div class="empty">Live-Daten gerade nicht erreichbar – Richtung einfach unten eintragen.</div>'; return; }
+    }
+    const vs = ((liveCache.data && liveCache.data.vehicles) || []).filter((v) => String(v.short || '').toUpperCase() === state.line && ['tram', 'bus', 'sev'].includes(v.type));
+    if (!vs.length) { list.innerHTML = `<div class="empty">Gerade keine Fahrt der Linie ${esc(state.line)} live zu sehen – Richtung einfach unten eintragen.</div>`; state.trip = null; return; }
+    vs.sort((a, b) => String(a.direction).localeCompare(String(b.direction)) || String(a.nextStop).localeCompare(String(b.nextStop)));
+    list.innerHTML = vs.map((v, i) => `<button type="button" class="trip" data-i="${i}" aria-pressed="${state.trip && state.trip.id === v.id}">
+        <strong>→ ${esc(v.direction || '?')}</strong><span class="d">${delayTxt(v.delay)}</span>
+        <small>nächster Halt: ${esc(v.nextStop || '–')}</small></button>`).join('');
+    list.querySelectorAll('.trip').forEach((b) => b.addEventListener('click', () => {
+      const v = vs[Number(b.dataset.i)];
+      const on = !(state.trip && state.trip.id === v.id);
+      state.trip = on ? v : null;
+      list.querySelectorAll('.trip').forEach((x) => x.setAttribute('aria-pressed', String(on && x === b)));
+      if (on) $('fDir').value = v.direction || '';
+    }));
+  }
+
+  $('saveBtn').addEventListener('click', async () => {
+    if ($('saveBtn').disabled) return;
+    $('saveBtn').disabled = true;
+    const t = state.trip;
+    try {
+      const d = await api('/entries', { method: 'POST', body: JSON.stringify({
+        line: state.line, vehicles: wagons(), date: $('fDate').value, time: $('fTime').value,
+        direction: $('fDir').value.trim(), stop: t ? t.nextStop : '', delay: t && Number.isInteger(t.delay) ? t.delay : null,
+        jid: t ? t.id : '', note: $('fNote').value.trim() }) });
+      toast(`Eingetragen: Linie ${d.entry.line} · Wagen ${d.entry.vehicles.join(' + ')} ✔`);
+      rememberWagons(d.entry.vehicles);
+      resetWagons(); $('fNote').value = ''; state.trip = null; refreshLive();
+      loadRecent();
+    } catch (e) { toast(e.message, true); }
+    validate();
+  });
+
+  function rememberWagons(list) {
+    let known = [];
+    try { known = JSON.parse(localStorage.getItem('fts_wagons') || '[]'); } catch (e) {}
+    known = [...list, ...known.filter((w) => !list.includes(w))].slice(0, 40);
+    try { localStorage.setItem('fts_wagons', JSON.stringify(known)); } catch (e) {}
+    $('knownWagons').innerHTML = known.map((w) => `<option value="${esc(w)}">`).join('');
+  }
+
+  // ---------- lists ----------
+  function entryRow(e) {
+    const month = e.date.slice(0, 7);
+    return `<div class="entry">
+      <span class="t">${esc(e.time)}</span>
+      ${badge(e.line, e.type)}
+      <div class="info"><div class="vchips">${(e.vehicles || []).map((v) => `<button type="button" class="vchip" data-veh="${esc(v)}" title="Alle Fahrten von Wagen ${esc(v)}">${esc(v)}</button>`).join('<span class="plus">+</span>')}</div>
+        <small>${e.direction ? '→ ' + esc(e.direction) : ''}${e.stop ? ` · bei ${esc(e.stop)}` : ''}${e.delay != null ? ' · ' + delayTxt(e.delay) : ''}${e.note ? ` · ${esc(e.note)}` : ''}</small></div>
+      ${e.mine ? `<button type="button" class="del" data-id="${esc(e.id)}" data-month="${month}" aria-label="Eintrag löschen" title="Löschen">🗑</button>` : '<span></span>'}
+    </div>`;
+  }
+  function renderEntries(box, entries, grouped) {
+    if (!entries.length) { box.innerHTML = '<div class="empty">Noch keine Einträge.</div>'; return; }
+    let html = '', day = '';
+    entries.forEach((e) => {
+      if (grouped && e.date !== day) { day = e.date; html += `<div class="day">${esc(deDay(day))}</div>`; }
+      html += entryRow(e);
+    });
+    box.innerHTML = html;
+  }
+  document.addEventListener('click', async (ev) => {
+    const v = ev.target.closest('.vchip');
+    if (v) { $('vehFilter').value = v.dataset.veh; setSpan(365); showTab('list'); return; }
+    const d = ev.target.closest('.del');
+    if (d) {
+      if (!confirmDelete(d)) return;
+      try { await api(`/entries/${encodeURIComponent(d.dataset.id)}?month=${d.dataset.month}`, { method: 'DELETE' }); toast('Gelöscht'); loadRecent(); if (!$('tab-list').hidden) loadList(); }
+      catch (e) { toast(e.message, true); }
+    }
+  });
+  // two taps instead of a browser dialog
+  function confirmDelete(btn) {
+    if (btn.dataset.armed) return true;
+    btn.dataset.armed = '1'; btn.textContent = 'Löschen?'; btn.style.width = 'auto'; btn.style.color = 'var(--danger)';
+    setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = '🗑'; btn.style.width = ''; btn.style.color = ''; } }, 3000);
+    return false;
+  }
+
+  async function loadRecent() {
+    try {
+      const today = new Date(), from = new Date(); from.setDate(from.getDate() - 30);
+      const d = await api(`/entries?from=${isoDay(from)}&to=${isoDay(today)}`);
+      renderEntries($('recent'), d.entries.slice(0, 8), true);
+    } catch (e) { $('recent').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  function setSpan(n) {
+    state.span = n;
+    document.querySelectorAll('[data-span]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.span) === n)));
+  }
+  document.querySelectorAll('[data-span]').forEach((b) => b.addEventListener('click', () => { setSpan(Number(b.dataset.span)); loadList(); }));
+  $('lineFilter').addEventListener('change', loadList);
+  let vfT = null;
+  $('vehFilter').addEventListener('input', () => { clearTimeout(vfT); vfT = setTimeout(loadList, 250); });
+  async function loadList() {
+    const to = new Date(), from = new Date(); from.setDate(from.getDate() - state.span);
+    const q = `from=${isoDay(from)}&to=${isoDay(to)}&line=${encodeURIComponent($('lineFilter').value)}&vehicle=${encodeURIComponent($('vehFilter').value.trim())}`;
+    $('csvBtn').href = `/api/fts/export.csv?from=${isoDay(from)}&to=${isoDay(to)}`;
+    $('list').innerHTML = '<div class="empty">Lädt …</div>';
+    try {
+      const d = await api('/entries?' + q);
+      renderEntries($('list'), d.entries, true);
+      if (d.count) $('list').insertAdjacentHTML('afterbegin', `<div class="muted" style="margin-top:10px">${d.count} ${d.count === 1 ? 'Fahrt' : 'Fahrten'}</div>`);
+    } catch (e) { $('list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  document.querySelectorAll('[data-vrange]').forEach((b) => b.addEventListener('click', () => {
+    state.vrange = b.dataset.vrange;
+    document.querySelectorAll('[data-vrange]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    loadVehicles();
+  }));
+  $('vehSearch').addEventListener('input', () => renderVehicles());
+  let vehData = [];
+  async function loadVehicles() {
+    $('vehList').innerHTML = '<div class="empty">Lädt …</div>';
+    try { vehData = (await api(`/vehicles?range=${state.vrange}`)).vehicles; renderVehicles(); }
+    catch (e) { $('vehList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+  function renderVehicles() {
+    const q = $('vehSearch').value.trim();
+    const rows = vehData.filter((r) => !q || r.vehicle.startsWith(q));
+    if (!rows.length) { $('vehList').innerHTML = '<div class="empty">Noch keine Wagen eingetragen.</div>'; return; }
+    $('vehList').innerHTML = `<table><thead><tr><th>Wagen</th><th>Fahrten</th><th>Zuletzt</th><th class="hide-s">Linien</th><th class="hide-s">oft mit</th></tr></thead><tbody>${rows.map((r) => `<tr>
+        <td><button type="button" class="vchip" data-veh="${esc(r.vehicle)}">${esc(r.vehicle)}</button></td>
+        <td class="num">${r.count}</td>
+        <td>${badge(r.last.line, '')} <span class="muted">${esc(new Date(r.last.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }))} ${esc(r.last.time)}</span></td>
+        <td class="hide-s">${r.lines.map(([l, n]) => `${esc(l)}<span class="muted">×${n}</span>`).join(' ')}</td>
+        <td class="hide-s">${r.with.map((w) => `<button type="button" class="vchip" data-veh="${esc(w)}">${esc(w)}</button>`).join(' ') || '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`;
+  }
+
+  // ---------- start ----------
+  async function start() {
+    setNow();
+    resetWagons();
+    rememberWagons([]);
+    try {
+      const m = await api('/meta');
+      state.lines = m.lines;
+      m.lines.forEach((l) => { state.colors[l.line] = l.color; });
+      renderLineChips();
+      $('lineFilter').insertAdjacentHTML('beforeend', m.lines.map((l) => `<option value="${esc(l.line)}">Linie ${esc(l.line)}</option>`).join(''));
+    } catch (e) { toast('Linien konnten nicht geladen werden', true); }
+    validate();
+    loadRecent();
+    const tab = (location.hash || '').slice(1);
+    if (tab === 'list' || tab === 'veh') showTab(tab);
+  }
+  start();
+})();
+</script>
+</body>
+</html>

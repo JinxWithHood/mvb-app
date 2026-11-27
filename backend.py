@@ -5764,6 +5764,9 @@ def _disruptions_changed(before, after):
 import admin as _admin
 _admin.init(app, _sys.modules[__name__])
 
+import fahrtenschreiber as _fts
+_fts.init(app, _sys.modules[__name__])
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print("=" * 60)
