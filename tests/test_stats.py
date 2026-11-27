@@ -41,11 +41,35 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(out['total']['n'], 4)
         self.assertEqual([l['key'] for l in out['lines']], ['tram:4', 'bus:52'])   # trams first
 
-    def test_unverified_realtime_is_not_counted(self):
+    def test_without_realtime_counts_as_no_rating(self):
         self.s.observe([veh('a', '4', 'A', 30, rt='unverified')], T0)
         self.s.observe([veh('a', '4', 'B', 0)], T0 + 60)
         out = self.s.summary(datetime.date(2026, 11, 26), datetime.date(2026, 11, 26))
-        self.assertEqual(out['total']['n'], 0)
+        self.assertEqual(out['total']['n'], 1)
+        self.assertEqual(out['total']['rated'], 0)
+        self.assertEqual(out['total']['unrated'], 100.0)
+        self.assertIsNone(out['total']['avg'])
+
+    def test_cancelled_stops_count_once(self):
+        s = self.s
+        v = veh('a', '9', 'A', 1)
+        v['cancelled'] = ['X', 'Y']
+        s.observe([v], T0)
+        s.observe([dict(v, nextStop='B')], T0 + 60)              # same trip again: X/Y not counted twice
+        out = s.summary(datetime.date(2026, 11, 26), datetime.date(2026, 11, 26))
+        t = out['total']
+        self.assertEqual(t['n'], 3)                                # A (+1) + two cancelled stops
+        self.assertEqual((t['onTime'], t['cancelled']), (33.3, 66.7))
+        self.assertEqual(t['avg'], 1.0)                            # average only from stops with realtime
+
+    def test_old_days_without_extra_slots(self):
+        store = {'2026-11': {'v': 1, 'days': {'26': {'lines': {'tram:4': {'s': '4', 't': 'tram', 'c': '#123', 'h': [0] * 5 + [3] + [0] * 15}}, 'disr': {}}}}}
+        s = stats.Stats(TZ, store.get, store.__setitem__)
+        s.observe([veh('a', '4', 'A', 0)], T0)
+        s.observe([veh('a', '4', 'B', 0)], T0 + 60)
+        out = s.summary(datetime.date(2026, 11, 26), datetime.date(2026, 11, 26))
+        self.assertEqual(out['total']['n'], 4)
+        self.assertEqual(out['total']['onTime'], 100.0)
 
     def test_saved_per_month_and_reloaded(self):
         self.run_trip()

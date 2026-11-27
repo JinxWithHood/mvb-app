@@ -2788,6 +2788,7 @@ def get_radar():
             now_hms = now.strftime('%H%M%S')
             next_stop, delay_min = '', None
             rt_state = 'ok'
+            cancelled_stops = []
 
             def to_sec(v):
                 v = str(v)[-6:]
@@ -2811,6 +2812,12 @@ def get_radar():
 
             try:
                 stops_l = jny.get('stopL') or []
+                # stops this trip doesn't serve (Ausfall) – the whole trip when HAFAS says so
+                for st in stops_l:
+                    if jny.get('isCncl') or st.get('aCncl') or st.get('dCncl'):
+                        lx_c = st.get('locX')
+                        if lx_c is not None and lx_c < len(loc_l):
+                            cancelled_stops.append(loc_l[lx_c].get('name', ''))
                 upcoming = [st for st in stops_l
                             if (st.get('aTimeR') or st.get('dTimeR') or st.get('aTimeS') or st.get('dTimeS') or '')[-6:] >= now_hms]
                 chosen = None
@@ -2867,6 +2874,7 @@ def get_radar():
                 'nextStop': next_stop,
                 'delay': delay_min,
                 'rtState': rt_state,
+                'cancelled': [c for c in cancelled_stops if c][:60],
             })
         except Exception as ex:
             print(f"[WARN] radar parse: {ex}")

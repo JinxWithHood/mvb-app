@@ -23,8 +23,12 @@ def _bin(delay):
     return max(H_MIN, min(H_MAX, int(delay))) - H_MIN
 
 
+HN = H_MAX - H_MIN + 1           # delay buckets; then two more slots:
+X_CANCEL, X_NONE = HN, HN + 1    # Ausfall (stop not served) · keine Wertung (no realtime)
+
+
 def _empty_hist():
-    return [0] * (H_MAX - H_MIN + 1)
+    return [0] * (HN + 2)
 
 
 def line_key(v):
@@ -84,12 +88,16 @@ class Stats:
         return day
 
     # ---------------- observing ----------------
-    def _record(self, key, meta, delay, ts):
+    def _record(self, key, meta, delay, ts, slot=None):
+        """delay in minutes – or slot=X_CANCEL / X_NONE."""
         day = self._daydoc(ts)
         ln = day['lines'].get(key)
         if ln is None:
             ln = day['lines'][key] = {'s': meta.get('short'), 't': meta.get('type'), 'c': meta.get('color'), 'h': _empty_hist()}
-        ln['h'][_bin(delay)] += 1
+        h = ln['h']
+        if len(h) < HN + 2:                          # days stored before the two extra slots existed
+            h.extend([0] * (HN + 2 - len(h)))
+        h[_bin(delay) if slot is None else slot] += 1
 
     def observe(self, vehicles, now=None):
         """One look at all vehicles. A stop counts when the vehicle's next stop changes."""
@@ -105,18 +113,28 @@ class Stats:
                 delay = v.get('delay')
                 ok = delay is not None and v.get('rtState', 'ok') == 'ok'
                 prev = self.track.get(jid)
-                if prev and prev['stop'] and stop != prev['stop'] and prev['delay'] is not None:
-                    self._record(prev['key'], prev['meta'], prev['delay'], now)
-                self.track[jid] = {'key': key, 'stop': stop, 'delay': delay if ok else None, 'seen': now,
-                                   'meta': {'short': v.get('short'), 'type': 'tram' if v.get('type') == 'tram' else 'bus',
-                                            'color': v.get('color')}}
+                meta = {'short': v.get('short'), 'type': 'tram' if v.get('type') == 'tram' else 'bus', 'color': v.get('color')}
+                if prev and prev['stop'] and stop != prev['stop']:
+                    if prev['delay'] is not None:
+                        self._record(prev['key'], prev['meta'], prev['delay'], now)
+                    else:                               # passed a stop without realtime: no rating
+                        self._record(prev['key'], prev['meta'], None, now, X_NONE)
+                done = set(prev['cx']) if prev else set()
+                for name in v.get('cancelled') or []:   # each cancelled stop of a trip counts once
+                    if name not in done:
+                        done.add(name)
+                        self._record(key, meta, None, now, X_CANCEL)
+                self.track[jid] = {'key': key, 'stop': stop, 'delay': delay if ok else None, 'seen': now, 'meta': meta, 'cx': sorted(done)}
             # vehicles that vanished: their last stop (the terminus) counts too
             for jid, prev in list(self.track.items()):
                 if jid in seen:
                     continue
                 if now - prev['seen'] > 600:
-                    if prev['delay'] is not None and prev['stop']:
-                        self._record(prev['key'], prev['meta'], prev['delay'], prev['seen'])
+                    if prev['stop'] and prev['stop'] not in (prev.get('cx') or []):
+                        if prev['delay'] is not None:
+                            self._record(prev['key'], prev['meta'], prev['delay'], prev['seen'])
+                        else:
+                            self._record(prev['key'], prev['meta'], None, prev['seen'], X_NONE)
                     del self.track[jid]
 
     def observe_disruptions(self, items, now=None):
@@ -214,13 +232,19 @@ def _num(s):
 
 
 def _metrics(h):
-    n = sum(h)
+    """Shares of all observed stops: zu früh · pünktlich · +3/+4 · ab +5 · Ausfall · keine Wertung (sum 100).
+    Average and maximum only from the stops with realtime."""
+    x = h[X_CANCEL] if len(h) > X_CANCEL else 0
+    u = h[X_NONE] if len(h) > X_NONE else 0
+    rated = sum(h[:HN])
+    n = rated + x + u
     if not n:
-        return {'n': 0, 'onTime': None, 'slight': None, 'late': None, 'early': None, 'avg': None, 'avgLate': None, 'max': None}
+        return {'n': 0, 'rated': 0, 'onTime': None, 'slight': None, 'late': None, 'early': None, 'cancelled': None,
+                'unrated': None, 'avg': None, 'avgLate': None, 'max': None}
     on = slight = late = early = 0
     s = late_sum = 0
     mx = None
-    for i, c in enumerate(h):
+    for i, c in enumerate(h[:HN]):
         if not c:
             continue
         dmin = i + H_MIN
@@ -237,8 +261,9 @@ def _metrics(h):
             on += c
         mx = dmin if mx is None or dmin > mx else mx
     delayed = slight + late
-    return {'n': n, 'onTime': round(100 * on / n, 1), 'slight': round(100 * slight / n, 1), 'late': round(100 * late / n, 1),
-            'early': round(100 * early / n, 1), 'avg': round(s / n, 2),
+    pct = lambda c: round(100 * c / n, 1)
+    return {'n': n, 'rated': rated, 'onTime': pct(on), 'slight': pct(slight), 'late': pct(late), 'early': pct(early),
+            'cancelled': pct(x), 'unrated': pct(u), 'avg': round(s / rated, 2) if rated else None,
             'avgLate': round(late_sum / delayed, 1) if delayed else None, 'max': mx}
 
 
